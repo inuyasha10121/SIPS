@@ -1,0 +1,8 @@
+{
+    "sips_version": "0.1",
+    "nodejs_path": "/usr/local/bin/node",
+    "modules": [
+        "DataInput",
+        "MS-FIT"
+    ]
+}
