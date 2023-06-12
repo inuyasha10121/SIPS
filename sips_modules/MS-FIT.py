@@ -11,6 +11,7 @@ from scipy.integrate import simpson
 import traceback
 
 import holoviews as hv
+from holoviews import opts
 from holoviews.streams import Stream, DoubleTap, SingleTap, Selection1D
 
 from bokeh import palettes
@@ -65,8 +66,10 @@ class module_class:
 
     def pane_definition(self):
         #Standard inputs and control definition
-        pp_rt_input = pn.widgets.FloatInput(name='Retention Time', value=3, step=0.01, start=0, end=100, width=80)
-        pp_rt_tolerance = pn.widgets.FloatInput(name='RT Tolerance', value=0.2, step=0.01, start=0, end=100, width=80)
+        pp_rt_input = pn.widgets.FloatInput(name='Retention Time', value=0, step=0.01, width=80)
+        pp_rt_tolerance = pn.widgets.FloatInput(name='RT Tolerance', value=0.2, step=0.01, start=0.01, width=80)
+        pp_left_bound = pn.widgets.FloatInput(name='Left Bound', value=0, step=0.01, width=80)
+        pp_right_bound = pn.widgets.FloatInput(name='Right Bound', value=0, step=0.01, width=80)
         pp_sigma_input = pn.widgets.FloatInput(name='Smoothing Factor', value=3, step=0.1, start=1E-32, end=50, width=80)
         pp_cwt_min_scale_input = pn.widgets.IntInput(name='CWT Min Scale', value=1, start=1, end=97, width=80)
         pp_cwt_max_scale_input = pn.widgets.IntInput(name='CWT Max Scale', value=60, start=20, end=100, width=80)
@@ -257,7 +260,11 @@ class module_class:
                 pn.bind(self.double_tap_input, x=tap.param.x, watch=True)
 
                 #Assemble full plot
-                self.plot = (selection_plot * self.overlay_plot * self.integration_statistics_plot).opts(show_legend=False)
+                self.plot = (selection_plot * self.overlay_plot * self.integration_statistics_plot).opts(show_legend=False).opts(
+                    opts.Curve(default_tools=['pan', 'wheel_zoom', 'reset']),
+                    opts.Area(default_tools=['pan', 'wheel_zoom', 'reset']),
+                    opts.VSpan(default_tools=['pan', 'wheel_zoom', 'reset'])
+                )
                 
             def overlay_plot_dmap(self):
                 try:
@@ -268,7 +275,7 @@ class module_class:
                     plots = {}
                     #Make sure we have stuff to actually plot, or return an empty plot if not
                     if (plate == "") or (compound == "") or (plate == None) or (compound == None):
-                        plots['N/A'] = hv.Curve((np.zeros(1), np.zeros(1))).opts(default_tools=['pan', 'wheel_zoom', 'reset'])
+                        plots['N/A'] = hv.Curve((np.zeros(1), np.zeros(1)))
                     else:
                         self.outer_instance.status_text.value = "Generating curves..."
                         #Grab all our possible wells
@@ -284,7 +291,7 @@ class module_class:
                                 x = self.outer_instance.library[plate][well][compound].time + self.outer_instance.library[plate][well][compound].drift_offset
                                 y = gaussian_filter1d(self.outer_instance.library[plate][well][compound].intensity, sigma)
                                 #Add the chromatograph curve to our dictionary
-                                plots[well] = hv.Curve((x,y)).opts(default_tools=['pan', 'wheel_zoom', 'reset'])
+                                plots[well] = hv.Curve((x,y))
                             self.outer_instance.progress_bar.value = int(np.round((i * 100) / len(well_list)))
                     self.outer_instance.status_text.value = f"Displaying overlay..."
                     #Display our overlaid plots
@@ -292,7 +299,7 @@ class module_class:
                 except Exception as e:
                     self.outer_instance.status_text.value = "overlay_plot_dmap: " + str(e)
                     self.outer_instance.debug_text.value += traceback.format_exc() + "\n\n"
-                    return hv.NdOverlay({'N/A': hv.Curve((np.zeros(1), np.zeros(1))).opts(default_tools=['pan', 'wheel_zoom', 'reset'])})
+                    return hv.NdOverlay({'N/A': hv.Curve((np.zeros(1), np.zeros(1)))})
 
             def integration_statistics_dmap(self):
                 try:
@@ -351,7 +358,7 @@ class module_class:
                     #If so, actually show the region
                     x0 = min(selection_start, selection_end)
                     x1 = max(selection_start, selection_end)
-                return hv.VSpan(x0,x1).opts(default_tools=['pan', 'wheel_zoom', 'reset'])
+                return hv.VSpan(x0,x1)
 
             def double_tap_input(self, x):
                 try:
@@ -361,6 +368,8 @@ class module_class:
                         self.selection_start = min(x, self.selection_start)
                         self.selection_midpoint = (self.selection_start + self.selection_end) / 2
                         self.selection_span = (np.abs(self.selection_end - self.selection_start) / 2)
+                        pp_left_bound.value = self.selection_start
+                        pp_right_bound.value = self.selection_end
                         pp_rt_input.value = self.selection_midpoint
                         pp_rt_tolerance.value = self.selection_span
                     else:
@@ -403,7 +412,7 @@ class module_class:
 
         pp_advanced_options = pn.Card(pn.Column(
             pn.pane.Markdown('<b>Fine Region Control</b>'),
-            pn.Row(pp_rt_input, pp_rt_tolerance),
+            pn.Row(pp_rt_input, pp_rt_tolerance, pp_left_bound, pp_right_bound),
             pn.pane.Markdown('<b>CWT Analysis</b>'),
             pn.Row(pp_cwt_min_scale_input, pp_cwt_max_scale_input, pp_cwt_neighborhood_input)
         ), title='Advanced', sizing_mode='stretch_width', collapsed=True)
@@ -509,7 +518,7 @@ class module_class:
 
         def pp_plate_selector_watchdog(event):
             try:
-                if event.new != None:
+                if (event.new != None) and (event.new != ""):
                     compounds = list(self.library[event.new].compounds)
                     if self.pp_compound_selector.value in compounds:
                         new_sele = self.pp_compound_selector.value
@@ -518,7 +527,7 @@ class module_class:
                     self.pp_compound_selector.param.update({'options': compounds, 'value': new_sele})
             except Exception as e:
                 self.status_text.value = "pp_plate_selector_watchdog: " + str(e)
-                self.debug_text.value += f"Plate: {event.new}\t{type(event.new)}"
+                self.debug_text.value += f"Plate: >{event.new}\t>{type(event.new)}"
                 self.debug_text.value += traceback.format_exc() + "\n\n"
         self.pp_plate_selector.param.watch(pp_plate_selector_watchdog, ['value'], onlychanged=False)
         
@@ -560,6 +569,8 @@ class module_class:
                         self.library[plate][well][compound].set_processing_parameters(
                             pp_rt_input.value,
                             pp_rt_tolerance.value,
+                            pp_left_bound.value,
+                            pp_right_bound.value,
                             pp_sigma_input.value,
                             pp_cwt_min_scale_input.value,
                             pp_cwt_max_scale_input.value,
@@ -590,6 +601,8 @@ class module_class:
                         self.library[plate][well][compound].set_processing_parameters(
                             pp_rt_input.value,
                             pp_rt_tolerance.value,
+                            pp_left_bound.value,
+                            pp_right_bound.value,
                             pp_sigma_input.value,
                             pp_cwt_min_scale_input.value,
                             pp_cwt_max_scale_input.value,
@@ -618,6 +631,8 @@ class module_class:
                             self.library[plate][well][compound].set_processing_parameters(
                                 pp_rt_input.value,
                                 pp_rt_tolerance.value,
+                                pp_left_bound.value,
+                                pp_right_bound.value,
                                 pp_sigma_input.value,
                                 pp_cwt_min_scale_input.value,
                                 pp_cwt_max_scale_input.value,

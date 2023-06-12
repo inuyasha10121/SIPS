@@ -146,12 +146,13 @@ class Chromatogram(param.Parameterized):
     
     #Peak processing based on https://arxiv.org/pdf/2101.08841.pdf
     def set_processing_parameters(self, 
-        rt: float, rt_tolerance: float, sigma: float, cwt_min_scale: int, cwt_max_scale: int, 
+        rt: float, rt_tolerance: float, initial_left_bound: float, initial_right_bound: float, sigma: float, cwt_min_scale: int, cwt_max_scale: int, 
         cwt_neighborhood: int, friction_threshold: float, drop_baseline: bool,
         stcurve_slope: Optional[float]=None, stcurve_intercept: Optional[float]=None
     ) -> None:
         self.rt = rt
         self.rt_tolerance = rt_tolerance
+        self.peak_bound_inds = [np.argmin(np.abs(initial_left_bound - self.time)), np.argmin(np.abs(initial_right_bound - self.time))]
         self.sigma = sigma
         self.cwt_min_scale = cwt_min_scale
         self.cwt_max_scale = cwt_max_scale
@@ -169,18 +170,23 @@ class Chromatogram(param.Parameterized):
          return np.gradient(np.gradient(smoothed_chromatogram))
         
     def cwt_generation(self, second_deriv: np.ndarray) -> np.ndarray:
+        #TODO: Eventually, we should limit this analysis to a range close to our peak bounds, but need more testing first before comitting to this and also need to work out display bugs
         return cwt(-second_deriv, ricker, np.arange(self.cwt_min_scale, self.cwt_max_scale))
     
     def cwt_analysis(self, cwtmatr: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        cwtarr = cwtmatr.flatten()
+        #Perform analysis only on the region the user specified
+        cwtarr = cwtmatr[:,self.peak_bound_inds[0]:self.peak_bound_inds[1]].flatten()
         maxima = np.zeros(cwtarr.size, dtype=bool)
         minima = np.zeros(cwtarr.size, dtype=bool)
-        faster_cwt_neighborhood(cwtarr, cwtmatr.shape[1], maxima, minima, self.cwt_neighborhood)
+        stride = self.peak_bound_inds[1] - self.peak_bound_inds[0]
+        faster_cwt_neighborhood(cwtarr, stride, maxima, minima, self.cwt_neighborhood)
         
-        maxima = maxima.reshape(cwtmatr.shape)
-        minima = minima.reshape(cwtmatr.shape)
+        maxima = maxima.reshape([cwtmatr.shape[0], stride])
+        minima = minima.reshape([cwtmatr.shape[0], stride])
         maxima_inds = np.array(np.where(maxima)).T[::-1] #[Scale, Time index]
+        maxima_inds[:,1] += self.peak_bound_inds[0]
         minima_inds = np.array(np.where(minima)).T#[Scale, Time index]
+        minima_inds[:,1] += self.peak_bound_inds[0]
         #Remove any maxima that do not have a minima flanking on one side
         maxima_inds = maxima_inds[(np.min(minima_inds[:,1]) < maxima_inds[:,1]) &
                                       (maxima_inds[:,1] < np.max(minima_inds[:,1]))]
@@ -405,7 +411,7 @@ class Well(param.Parameterized):
 
 class Plate(param.Parameterized):
     wells = param.Dict({}, doc="Stored wells")
-    compounds = param.Parameter(set(), doc="All compounds found during data entry")
+    compounds = param.List([], doc="All compounds found during data entry")
     
     parent_alignment = param.Array(np.array([]), doc="Alignment for all wells of the parent DNA sequence")
     
@@ -476,8 +482,8 @@ class Plate(param.Parameterized):
     #    return json_params
 
 class Library(param.Parameterized):
-    plates = param.Dict(default={}, doc="Stored plates")
-    compounds = param.Parameter(default=set(), doc="All compounds found during data entry")
+    plates = param.Dict({}, doc="Stored plates")
+    compounds = param.List([], doc="All compounds found during data entry")
     
     def __init__(self, **params):
         super().__init__(**params)

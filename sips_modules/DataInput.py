@@ -206,8 +206,10 @@ class module_class:
                         self.library[plate].add_well(well)
                     if compound not in self.library[plate][well]:
                         self.library[plate][well].add_chromatogram(compound, time, intensity, sample_name, source)
-                        self.library.compounds.add(compound)
-                        self.library[plate].compounds.add(compound)
+                        if compound not in self.library.compounds:
+                            self.library.compounds.append(compound)
+                        if compound not in self.library[plate].compounds:
+                            self.library[plate].compounds.append(compound)
                 #Go back to idle
                 self.status_text.value = "Done loading data!"
                 fi_multi_upload.progress_state = 0
