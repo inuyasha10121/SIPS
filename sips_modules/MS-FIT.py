@@ -91,6 +91,8 @@ class module_class:
         pp_peak_snr_display = pn.widgets.TextInput(name='SNR', width=100, disabled=True)
         pp_peak_stcurve_area = pn.widgets.TextInput(name='St. Curve', placeholder='N/A', width=100, disabled=True)
 
+        pp_cwt_analysis_button = pn.widgets.Button(name='CWT Analysis', button_type='primary')
+
         def download_data_csv_callback():
             try:
                 #First, get all our compounds
@@ -173,8 +175,8 @@ class module_class:
 
             def highlight_dmap(self):
                 try:
-                    plate_row = hv.Dimension('plate_row', label='Row', range=(-0.5, 7.5))
-                    plate_col = hv.Dimension('plate_col', label='Column', range=(-0.5, 11.5))
+                    plate_row = hv.Dimension('plate_row', range=(-0.5, 7.5))
+                    plate_col = hv.Dimension('plate_col', range=(-0.5, 11.5))
                     plots = []
                     if self.well_list == []:
                         plots.append([(0,0),(0,0)])
@@ -242,8 +244,8 @@ class module_class:
         #Custom tool for setting integration ranges
         class IntegrationSelection(param.Parameterized):
 
-            selection_start = param.Parameter(default=0)
-            selection_end = param.Parameter(default=0)
+            selection_start = param.Number(default=None)
+            selection_end = param.Number(default=None)
             selection_midpoint = param.Number(default=0)
             selection_span = param.Number(default=0)
 
@@ -251,7 +253,7 @@ class module_class:
                 super().__init__(**params)
                 self.outer_instance = outer_instance #Grab outer so we can access the Library
                 #Setup overlay plot bits
-                self.overlay_plot = hv.DynamicMap(self.overlay_plot_dmap, streams=[Stream.define('Next')()]).opts(framewise=True)
+                self.overlay_plot = hv.DynamicMap(self.overlay_plot_dmap, streams=[Stream.define('Next')()]).opts(framewise=True, tools=['hover'])
                 self.integration_statistics_plot = hv.DynamicMap(self.integration_statistics_dmap, streams=[Stream.define('Next')()]).opts(framewise=True)
 
                 #Setup selection plot bits
@@ -261,14 +263,13 @@ class module_class:
 
                 #Assemble full plot
                 self.plot = (selection_plot * self.overlay_plot * self.integration_statistics_plot).opts(show_legend=False).opts(
-                    opts.Curve(default_tools=['pan', 'wheel_zoom', 'reset']),
-                    opts.Area(default_tools=['pan', 'wheel_zoom', 'reset']),
-                    opts.VSpan(default_tools=['pan', 'wheel_zoom', 'reset'])
+                    opts.Curve(default_tools=['pan', 'wheel_zoom', 'reset'], xlabel='Time', ylabel='Intensity'),
+                    opts.Area(default_tools=['pan', 'wheel_zoom', 'reset'], xlabel='Time', ylabel='Intensity'),
+                    opts.VSpan(default_tools=['pan', 'wheel_zoom', 'reset'], xlabel='Time', ylabel='Intensity')
                 )
                 
             def overlay_plot_dmap(self):
                 try:
-                    sigma = pp_sigma_input.value
                     plate = self.outer_instance.pp_plate_selector.value
                     compound = self.outer_instance.pp_compound_selector.value
                     self.outer_instance.status_text.value = "Establishing overlay object..."
@@ -289,7 +290,7 @@ class module_class:
                             if compound in self.outer_instance.library[plate][well]:
                                 #Get our time and smoothed chromatograph
                                 x = self.outer_instance.library[plate][well][compound].time + self.outer_instance.library[plate][well][compound].drift_offset
-                                y = gaussian_filter1d(self.outer_instance.library[plate][well][compound].intensity, sigma)
+                                y = gaussian_filter1d(self.outer_instance.library[plate][well][compound].intensity, pp_sigma_input.value)
                                 #Add the chromatograph curve to our dictionary
                                 plots[well] = hv.Curve((x,y))
                             self.outer_instance.progress_bar.value = int(np.round((i * 100) / len(well_list)))
@@ -350,7 +351,10 @@ class module_class:
             
             def selection_plot_dmap(self, selection_start, selection_end):
                 #Check if we have made a selection, as indicated by the presence of selection_end
-                if selection_end == None:
+                if selection_start == None:
+                    x0 = 0
+                    x1 = 0
+                elif selection_end == None:
                     #If not, just show a line at the start of our selection
                     x0 = selection_start
                     x1 = selection_start
@@ -363,7 +367,9 @@ class module_class:
             def double_tap_input(self, x):
                 try:
                     #Check if we are completing a selection by filling in the end, or set the start if not
-                    if self.selection_end == None:
+                    if self.selection_start == None:
+                        self.selection_start = x
+                    elif self.selection_end == None:
                         self.selection_end = max(x, self.selection_start)
                         self.selection_start = min(x, self.selection_start)
                         self.selection_midpoint = (self.selection_start + self.selection_end) / 2
@@ -383,6 +389,81 @@ class module_class:
                     self.outer_instance.debug_text.value += traceback.format_exc() + "\n\n"
 
         selection_view = IntegrationSelection(outer_instance=self)
+
+        def cwt_analysis_dmap():
+            cwtmatr = np.zeros((1,1))
+            bounds = [0, 0, 1, 1]
+            minima_inds = np.zeros((1,2))
+            maxima_inds = np.zeros((1,2))
+            minima_scores = np.zeros(1)
+            maxima_scores = np.zeros(1)
+            try:
+                if len(plate_view.well_list) != 1:
+                    self.status_text.value = "Please select only 1 well to analyze"
+                elif selection_view.selection_end == None:
+                    self.status_text.value = "Please ensure a peak span is set"
+                else:
+                    plate = self.pp_plate_selector.value
+                    well = plate_view.well_list[0]
+                    compound = self.pp_compound_selector.value
+                    self.status_text.value = "Performing CWT analysis..."
+                    #Set relevant parameters for well
+                    self.library[plate][well][compound].rt = pp_rt_input.value
+                    self.library[plate][well][compound].rt_tolerance = pp_rt_tolerance.value
+                    self.library[plate][well][compound].sigma = pp_sigma_input.value
+                    self.library[plate][well][compound].cwt_min_scale = pp_cwt_min_scale_input.value
+                    self.library[plate][well][compound].cwt_max_scale = pp_cwt_max_scale_input.value
+                    self.library[plate][well][compound].cwt_neighborhood = pp_cwt_neighborhood_input.value
+                    self.library[plate][well][compound].peak_bound_inds = [
+                        np.argmin(np.abs(pp_left_bound.value - self.library[plate][well][compound].time)), 
+                        np.argmin(np.abs(pp_right_bound.value - self.library[plate][well][compound].time))
+                    ]
+                    #Perform CWT peak finding workflow
+                    smoothed_chromatogram = self.library[plate][well][compound].gaussian_smoothing()
+                    second_deriv = self.library[plate][well][compound].second_deriv(smoothed_chromatogram)
+                    cwtmatr = self.library[plate][well][compound].cwt_generation(second_deriv)
+                    self.status_text.value = "Finding minima/maxima in selection range..."
+                    minima_inds, maxima_inds = self.library[plate][well][compound].cwt_analysis(cwtmatr)
+                    best_index = self.library[plate][well][compound].score_stationary_points(cwtmatr, maxima_inds, self.library[plate][well][compound].rt, self.library[plate][well][compound].rt_tolerance)
+                    print(f"BEST: {best_index}")
+                    self.library[plate][well][compound].get_initial_peak_bounds(cwtmatr, minima_inds)
+                    #Figure out bounds with appropriate padding
+                    time_per_pixel = (self.library[plate][well][compound].time[-1] - self.library[plate][well][compound].time[0]) / cwtmatr.shape[1]
+                    bounds = [
+                        self.library[plate][well][compound].time[0] - (time_per_pixel/2),
+                        pp_cwt_min_scale_input.value - 0.5,
+                        self.library[plate][well][compound].time[-1] + (time_per_pixel/2),
+                        pp_cwt_max_scale_input.value + 0.5
+                    ]
+                    #Score our minima and maxima to our specified points
+                    maxima_scores = np.zeros(maxima_inds.shape[0])
+                    maxima_scores[self.library[plate][well][compound].score_stationary_points(cwtmatr, maxima_inds, pp_rt_input.value, pp_rt_tolerance.value)] = 1
+                    minima_scores = np.zeros(minima_inds.shape[0])
+                    minima_scores[np.where(minima_inds[:,1] == self.library[plate][well][compound].peak_bound_inds[0])[0][0]] = 1
+                    minima_scores[np.where(minima_inds[:,1] == self.library[plate][well][compound].peak_bound_inds[1])[0][0]] = 1
+                    a = np.where(minima_inds[:,1] == self.library[plate][well][compound].peak_bound_inds[0])[0][0]
+                    b = np.where(minima_inds[:,1] == self.library[plate][well][compound].peak_bound_inds[1])[0][0]
+                    print(f"{self.library[plate][well][compound].time[minima_inds[a,1]]}\t{self.library[plate][well][compound].time[minima_inds[b,1]]}")
+
+                    #Map minima and maxima indicies to time values
+                    minima_inds = minima_inds.astype(np.float32)
+                    minima_inds[:,0] += pp_cwt_min_scale_input.value
+                    minima_inds[:,1] = minima_inds[:,1] * time_per_pixel + self.library[plate][well][compound].time[0]
+                    maxima_inds = maxima_inds.astype(np.float32)
+                    maxima_inds[:,0] += pp_cwt_min_scale_input.value
+                    maxima_inds[:,1] = maxima_inds[:,1] * time_per_pixel + self.library[plate][well][compound].time[0]
+                    
+                    
+            except Exception as e:
+                self.status_text.value = "cwt_analysis_dmap: " + str(e)
+                self.debug_text.value += traceback.format_exc() + "\n\n"
+            return hv.Overlay([
+                hv.Image(cwtmatr[::-1,:], kdims=['x', 'cwt_scale'], bounds=bounds).opts(cmap='viridis'),
+                hv.Scatter({'x': minima_inds[:,1], 'cwt_scale': minima_inds[:,0], 'min_score': minima_scores}, kdims='x', vdims=['cwt_scale', 'min_score']).opts(framewise=True, color='min_score', cmap='kbc'),#, color='#BCFEAB'),
+                hv.Scatter({'x': maxima_inds[:,1], 'cwt_scale': maxima_inds[:,0], 'max_score': maxima_scores}, kdims='x', vdims=['cwt_scale', 'max_score']).opts(framewise=True, color='max_score', cmap='kr')#, color='#0218DB')
+            ])
+        cwt_analysis_plot = hv.DynamicMap(cwt_analysis_dmap, streams=[Stream.define('Next')()]).opts(framewise=True)
+        
         
         #Final view assembly
         pp_param_control_box = pn.WidgetBox(
@@ -414,7 +495,9 @@ class module_class:
             pn.pane.Markdown('<b>Fine Region Control</b>'),
             pn.Row(pp_rt_input, pp_rt_tolerance, pp_left_bound, pp_right_bound),
             pn.pane.Markdown('<b>CWT Analysis</b>'),
-            pn.Row(pp_cwt_min_scale_input, pp_cwt_max_scale_input, pp_cwt_neighborhood_input)
+            pn.Row(pp_cwt_min_scale_input, pp_cwt_max_scale_input, pp_cwt_neighborhood_input),
+            pp_cwt_analysis_button,
+            cwt_analysis_plot.opts(width=500, height=250)
         ), title='Advanced', sizing_mode='stretch_width', collapsed=True)
 
         peak_processing_view = pn.Column(
@@ -538,12 +621,11 @@ class module_class:
                     #Update our well selections if we have previous ones
                     if len(plate_view.well_list) > 0:
                         #Only retain wells which have the newly selected compound
-                        new_selection_well_list = []
-                        for well in plate_view.well_list:
-                            if well in self.library[plate]:
-                                if event.new in self.library[plate][well]:
-                                    new_selection_well_list.append(well)
-                        plate_view.well_list = new_selection_well_list[:]
+                        for i in range(len(plate_view.well_list)-1, -1, -1):
+                            if plate_view.well_list[i] not in self.library[plate]:
+                                del plate_view.well_list[i]
+                            elif event.new not in self.library[plate][plate_view.well_list[i]]:
+                                del plate_view.well_list[i]
                         plate_view.highlight_plot.event()
                     plate_view.plate_plot.event()
                     selection_view.overlay_plot.event()
@@ -585,7 +667,7 @@ class module_class:
                 selection_view.overlay_plot.event()
                 selection_view.integration_statistics_plot.event()
                 plate_view.plate_plot.event()
-                self.status_text.value = "Done integrating plate!"
+                self.status_text.value = "Done integrating well!"
             except Exception as e:
                 self.status_text.value = "pp_integrate_plate_button_callback: " + str(e)
                 self.debug_text.value += traceback.format_exc() + "\n\n"
@@ -712,5 +794,9 @@ class module_class:
                 selection_view.integration_statistics_plot.event()
                 self.status_text.value = "Done applying drift correction to selection!"
         pp_drift_correct_plate_button.on_click(pp_drift_correct_plate_button_callback)
+
+        def pp_cwt_analysis_button_callback(event):
+            cwt_analysis_plot.event()
+        pp_cwt_analysis_button.on_click(pp_cwt_analysis_button_callback)
 
         return peak_processing_view

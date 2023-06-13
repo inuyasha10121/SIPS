@@ -152,7 +152,7 @@ class Chromatogram(param.Parameterized):
     ) -> None:
         self.rt = rt
         self.rt_tolerance = rt_tolerance
-        self.peak_bound_inds = [np.argmin(np.abs(initial_left_bound - self.time)), np.argmin(np.abs(initial_right_bound - self.time))]
+        self.peak_bound_inds = [np.argmin(np.abs(initial_left_bound - self.time + self.drift_offset)), np.argmin(np.abs(initial_right_bound - self.time + self.drift_offset))]
         self.sigma = sigma
         self.cwt_min_scale = cwt_min_scale
         self.cwt_max_scale = cwt_max_scale
@@ -174,45 +174,46 @@ class Chromatogram(param.Parameterized):
         return cwt(-second_deriv, ricker, np.arange(self.cwt_min_scale, self.cwt_max_scale))
     
     def cwt_analysis(self, cwtmatr: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        #Perform analysis only on the region the user specified
-        cwtarr = cwtmatr[:,self.peak_bound_inds[0]:self.peak_bound_inds[1]].flatten()
+        cwtarr = cwtmatr.flatten()
         maxima = np.zeros(cwtarr.size, dtype=bool)
         minima = np.zeros(cwtarr.size, dtype=bool)
-        stride = self.peak_bound_inds[1] - self.peak_bound_inds[0]
-        faster_cwt_neighborhood(cwtarr, stride, maxima, minima, self.cwt_neighborhood)
+        faster_cwt_neighborhood(cwtarr, cwtmatr.shape[1], maxima, minima, self.cwt_neighborhood)
         
-        maxima = maxima.reshape([cwtmatr.shape[0], stride])
-        minima = minima.reshape([cwtmatr.shape[0], stride])
+        maxima = maxima.reshape(cwtmatr.shape)
+        minima = minima.reshape(cwtmatr.shape)
         maxima_inds = np.array(np.where(maxima)).T[::-1] #[Scale, Time index]
-        maxima_inds[:,1] += self.peak_bound_inds[0]
         minima_inds = np.array(np.where(minima)).T#[Scale, Time index]
-        minima_inds[:,1] += self.peak_bound_inds[0]
         #Remove any maxima that do not have a minima flanking on one side
         maxima_inds = maxima_inds[(np.min(minima_inds[:,1]) < maxima_inds[:,1]) &
                                       (maxima_inds[:,1] < np.max(minima_inds[:,1]))]
         return minima_inds, maxima_inds
     
-    def score_maxima(self, cwtmatr: np.ndarray, maxima_inds: np.ndarray) -> int:
-        fitness_values = cwtmatr[maxima_inds[:,0], maxima_inds[:,1]] * (
-            1 - ((self.time[maxima_inds[:,1]] + self.drift_offset - self.rt) / self.rt_tolerance)**2)
+    def score_stationary_points(self, cwtmatr: np.ndarray, indices: np.ndarray, target_time: float, target_tolerance: float) -> int:
+        fitness_values = cwtmatr[indices[:,0], indices[:,1]] * (
+            1 - (((self.time + self.drift_offset)[indices[:,1]] - target_time) / target_tolerance)**2)
         return fitness_values.argmax()
     
-    def get_initial_peak_bounds(self, best_index: int, minima_inds: np.ndarray, maxima_inds: np.ndarray) -> None:
-        all_inds = np.vstack((maxima_inds, minima_inds))
-        max_range = np.max(all_inds, axis=0)
-        min_range = np.min(all_inds, axis=0)
-        denom = max_range - min_range
-        norm_maxima_inds = (maxima_inds - min_range) / denom
-        norm_minima_inds = (minima_inds - min_range) / denom
-        
-        #Get distances of minima to the best peak
-        dists = np.sqrt(np.sum((norm_maxima_inds[best_index] - norm_minima_inds)**2, axis=1))
-        #Determine closest minima flanking the peak maximum
-        left_inds = np.where(minima_inds[:,1] < maxima_inds[best_index,1])[0]
-        right_inds = np.where(minima_inds[:,1] > maxima_inds[best_index,1])[0]
-        closest_left_ind = left_inds[dists[left_inds].argmin()]
-        closest_right_ind = right_inds[dists[right_inds].argmin()]
-        self.peak_bound_inds = [minima_inds[closest_left_ind][1], minima_inds[closest_right_ind][1]]
+    def get_initial_peak_bounds(self, cwtmatr: np.ndarray, minima_inds: np.ndarray) -> None:
+        partial_span = ((self.time[-1] - self.time[0]) / self.time.size) * (self.peak_bound_inds[1] - self.peak_bound_inds[0]) / 3
+        self.peak_bound_inds = [
+            minima_inds[self.score_stationary_points(-cwtmatr, minima_inds, self.rt - partial_span, partial_span),1],
+            minima_inds[self.score_stationary_points(-cwtmatr, minima_inds, self.rt + partial_span, partial_span),1],
+        ]
+        #all_inds = np.vstack((maxima_inds, minima_inds))
+        #max_range = np.max(all_inds, axis=0)
+        #min_range = np.min(all_inds, axis=0)
+        #denom = max_range - min_range
+        #norm_maxima_inds = (maxima_inds - min_range) / denom
+        #norm_minima_inds = (minima_inds - min_range) / denom
+        #
+        ##Get distances of minima to the best peak
+        #dists = np.sqrt(np.sum((norm_maxima_inds[best_index] - norm_minima_inds)**2, axis=1))
+        ##Determine closest minima flanking the peak maximum
+        #left_inds = np.where(minima_inds[:,1] < maxima_inds[best_index,1])[0]
+        #right_inds = np.where(minima_inds[:,1] > maxima_inds[best_index,1])[0]
+        #closest_left_ind = left_inds[dists[left_inds].argmin()]
+        #closest_right_ind = right_inds[dists[right_inds].argmin()]
+        #self.peak_bound_inds = [minima_inds[closest_left_ind][1], minima_inds[closest_right_ind][1]]
     
     def friction_boundary_correction(self, smoothed_chromatogram: np.ndarray) -> None:
         #TODO: We should probably use the norm range of the peak, instead of the full spectrum
@@ -267,10 +268,11 @@ class Chromatogram(param.Parameterized):
         second_deriv = self.second_deriv(smoothed_chromatogram)
         cwtmatr = self.cwt_generation(second_deriv)
         minima_inds, maxima_inds = self.cwt_analysis(cwtmatr)
-        best_index = self.score_maxima(cwtmatr, maxima_inds)
-        self.get_initial_peak_bounds(best_index, minima_inds, maxima_inds)
+        best_index = self.score_stationary_points(cwtmatr, maxima_inds, self.rt, self.rt_tolerance)
+        self.get_initial_peak_bounds(cwtmatr, minima_inds)
         self.friction_boundary_correction(smoothed_chromatogram)
         self.partial_convex_hull_boundary_correction()
+        self.rt = self.time[maxima_inds[best_index,1]] + self.drift_offset
         self.get_peak_characteristics(smoothed_chromatogram, maxima_inds, best_index)
         if (self.stcurve_slope != None) and (self.stcurve_intercept != None):
             self.peak_stcurve_area = (self.stcurve_slope * self.peak_area) + self.stcurve_intercept
