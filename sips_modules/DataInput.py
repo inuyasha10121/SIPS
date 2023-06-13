@@ -6,7 +6,6 @@ import traceback
 
 from custom_widgets.fileprogressinput import FileProgressInput
 from custom_widgets.dataselectiontable import DataSelectionTable
-#from custom_widgets.dataselectiontable import DataSelectionTable
 from .PlateClass import *
 
 sidebar_text = """### Data Input

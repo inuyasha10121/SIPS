@@ -588,7 +588,6 @@ export class FileProgressInputView extends InputWidgetView {
                         const harvest_targets: number[] = event.data[event.data.length-1]
                         Promise.all(
                             files.map(async (file: EmpowerFile) => {
-                                console.log(file.tag)
                                 const content = await _read_file_text(file)
                                 const parsed_content = await _harvest_empower_file(content, harvest_compounds, harvest_sources, harvest_targets)
                                 return parsed_content
@@ -598,7 +597,6 @@ export class FileProgressInputView extends InputWidgetView {
                         })
                     })
                 }
-                console.log(this.input_el.files)
                 this.worker_pool.task_pool(harvest_empower_data, Array.from(this.input_el.files as FileList), [harvest_compounds, harvest_sources, harvest_targets]).then((result: ([string, string, string, string, number[], number[]][][])) =>{
                     let results = result.reduce((accumulator, value) => accumulator.concat(value), [])
                     let results_trans = results[0].map((_, colIndex) => results.map(row => row[colIndex]));

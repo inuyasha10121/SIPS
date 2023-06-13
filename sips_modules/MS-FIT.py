@@ -12,7 +12,7 @@ import traceback
 
 import holoviews as hv
 from holoviews import opts
-from holoviews.streams import Stream, DoubleTap, SingleTap, Selection1D
+from holoviews.streams import Stream, DoubleTap, SingleTap, BoundsX
 
 from bokeh import palettes
 
@@ -62,7 +62,7 @@ class module_class:
             except Exception as e:
                 self.status_text.value = "tab_selection_callback" + str(e)
                 self.debug_text.value += traceback.format_exc() + "\n\n"
-        tab_set.param.watch(tab_selection_callback, ['active'])
+        tab_set.param.watch(tab_selection_callback, ['active'], onlychanged=False)
 
     def pane_definition(self):
         #Standard inputs and control definition
@@ -87,11 +87,11 @@ class module_class:
         pp_integrate_plate_button = pn.widgets.Button(name='Plate', width=80, disabled=True, button_type='primary')
         pp_integrate_library_button = pn.widgets.Button(name='Library', width=80, disabled=True, button_type='primary')
         
-        pp_peak_rt_display = pn.widgets.TextInput(name='Retention Time', width=100, disabled=True)
-        pp_peak_area_display = pn.widgets.TextInput(name='Area', width=100, disabled=True)
-        pp_peak_height_display = pn.widgets.TextInput(name='Height', width=100, disabled=True)
-        pp_peak_snr_display = pn.widgets.TextInput(name='SNR', width=100, disabled=True)
-        pp_peak_stcurve_area = pn.widgets.TextInput(name='St. Curve', placeholder='N/A', width=100, disabled=True)
+        pp_peak_rt_display = pn.widgets.TextInput(name='Retention Time', width=150, disabled=True)
+        pp_peak_area_display = pn.widgets.TextInput(name='Area', width=150, disabled=True)
+        pp_peak_height_display = pn.widgets.TextInput(name='Height', width=150, disabled=True)
+        pp_peak_snr_display = pn.widgets.TextInput(name='SNR', width=150, disabled=True)
+        pp_peak_stcurve_area = pn.widgets.TextInput(name='St. Curve', placeholder='N/A', width=150, disabled=True)
 
         pp_cwt_analysis_button = pn.widgets.Button(name='CWT Analysis', button_type='primary')
 
@@ -156,21 +156,21 @@ class module_class:
                 well = f"{chr(int(72-np.round(y, 0)))}{str(int(np.round(x, 0)+1)).zfill(2)}"
                 if well in self.well_list:
                     del self.well_list[self.well_list.index(well)]
-                    selection_view.overlay_plot.event()
+                    selection_view.update_overlay_plot()
                     selection_view.integration_statistics_plot.event()
                     self.highlight_plot.event()
                     selection_change()
                 else:
                     if well in self.outer_instance.library[plate]:
                         self.well_list.append(well)
-                        selection_view.overlay_plot.event()
+                        selection_view.update_overlay_plot()
                         selection_view.integration_statistics_plot.event()
                         self.highlight_plot.event()
                         selection_change()
 
             def double_tap_clear(self, x, y):
                 self.well_list = []
-                selection_view.overlay_plot.event()
+                selection_view.update_overlay_plot()
                 selection_view.integration_statistics_plot.event()
                 self.highlight_plot.event()
                 selection_change()
@@ -245,32 +245,26 @@ class module_class:
 
         #Custom tool for setting integration ranges
         class IntegrationSelection(param.Parameterized):
-
-            selection_start = param.Number(default=None)
-            selection_end = param.Number(default=None)
-            selection_midpoint = param.Number(default=0)
-            selection_span = param.Number(default=0)
-
             def __init__(self, outer_instance, **params):
                 super().__init__(**params)
                 self.outer_instance = outer_instance #Grab outer so we can access the Library
                 #Setup overlay plot bits
-                self.overlay_plot = hv.DynamicMap(self.overlay_plot_dmap, streams=[Stream.define('Next')()]).opts(framewise=True, tools=['hover'])
+                self.update_overlay_plot_stream = Stream.define('flag', flag=False)()
+                self.selection_stream = BoundsX(boundsx=(0,0))
+                self.selection_stream.param.watch(self.range_selection_input, ['boundsx'], onlychanged=False)
+                self.overlay_plot = hv.DynamicMap(self.overlay_plot_dmap, streams=[self.selection_stream, self.update_overlay_plot_stream]).opts(framewise=True, tools=['hover', 'xbox_select'])
                 self.integration_statistics_plot = hv.DynamicMap(self.integration_statistics_dmap, streams=[Stream.define('Next')()]).opts(framewise=True)
-
-                #Setup selection plot bits
-                selection_plot = hv.DynamicMap(self.selection_plot_dmap, streams=[self.param.selection_start, self.param.selection_end]).opts(framewise=True)
-                tap = DoubleTap(source=selection_plot)
-                pn.bind(self.double_tap_input, x=tap.param.x, watch=True)
-
-                #Assemble full plot
-                self.plot = (selection_plot * self.overlay_plot * self.integration_statistics_plot).opts(show_legend=False).opts(
-                    opts.Curve(default_tools=['pan', 'wheel_zoom', 'reset'], xlabel='Time', ylabel='Intensity'),
-                    opts.Area(default_tools=['pan', 'wheel_zoom', 'reset'], xlabel='Time', ylabel='Intensity'),
-                    opts.VSpan(default_tools=['pan', 'wheel_zoom', 'reset'], xlabel='Time', ylabel='Intensity')
+                self.integration_region_plot = hv.DynamicMap(self.selection_plot_dmap, streams=[self.selection_stream]).opts(framewise=True)
+                self.plot = (self.integration_region_plot * self.overlay_plot * self.integration_statistics_plot).opts(show_legend=False, framewise=True).opts(
+                    opts.Curve(default_tools=['pan', 'wheel_zoom', 'reset'], xlabel='Time', ylabel='Intensity', framewise=True),
+                    opts.Area(default_tools=['pan', 'wheel_zoom', 'reset'], xlabel='Time', ylabel='Intensity', framewise=True),
+                    opts.VSpan(default_tools=['pan', 'wheel_zoom', 'reset'], xlabel='Time', ylabel='Intensity', framewise=True)
                 )
-                
-            def overlay_plot_dmap(self):
+
+            def update_overlay_plot(self):
+                self.update_overlay_plot_stream.event(flag=not self.update_overlay_plot_stream.flag)
+            
+            def overlay_plot_dmap(self, **kwargs):
                 try:
                     plate = self.outer_instance.pp_plate_selector.value
                     compound = self.outer_instance.pp_compound_selector.value
@@ -296,7 +290,7 @@ class module_class:
                                 #Add the chromatograph curve to our dictionary
                                 plots[well] = hv.Curve((x,y))
                             self.outer_instance.progress_bar.value = int(np.round((i * 100) / len(well_list)))
-                    self.outer_instance.status_text.value = f"Displaying overlay..."
+                        self.outer_instance.status_text.value = f"Displaying overlay..."
                     #Display our overlaid plots
                     return hv.NdOverlay(plots)
                 except Exception as e:
@@ -352,43 +346,19 @@ class module_class:
                             hv.Curve({'x': [0], 'y': [0]})
                         ])
             
-            def selection_plot_dmap(self, selection_start, selection_end):
-                #Check if we have made a selection, as indicated by the presence of selection_end
-                if selection_start == None:
-                    x0 = 0
-                    x1 = 0
-                elif selection_end == None:
-                    #If not, just show a line at the start of our selection
-                    x0 = selection_start
-                    x1 = selection_start
-                else:
-                    #If so, actually show the region
-                    x0 = min(selection_start, selection_end)
-                    x1 = max(selection_start, selection_end)
-                return hv.VSpan(x0,x1)
+            def selection_plot_dmap(self, boundsx):
+                return hv.VSpan(boundsx[0], boundsx[1])
 
-            def double_tap_input(self, x):
+            def range_selection_input(self, event):
                 try:
-                    #Check if we are completing a selection by filling in the end, or set the start if not
-                    if self.selection_start == None:
-                        self.selection_start = x
-                    elif self.selection_end == None:
-                        self.selection_end = max(x, self.selection_start)
-                        self.selection_start = min(x, self.selection_start)
-                        self.selection_midpoint = (self.selection_start + self.selection_end) / 2
-                        self.selection_span = (np.abs(self.selection_end - self.selection_start) / 2)
-                        pp_left_bound.value = self.selection_start
-                        pp_right_bound.value = self.selection_end
-                        pp_rt_input.value = self.selection_midpoint
-                        pp_rt_tolerance.value = self.selection_span
-                    else:
-                        self.selection_start = x
-                        self.selection_end = None
-                        self.selection_midpoint = 0
-                        self.selection_span = 0
-                    selection_change()
+                    if (event.new[0] != None) and (event.new[1] != None):
+                        pp_left_bound.value = event.new[0]
+                        pp_right_bound.value = event.new[1]
+                        pp_rt_input.value = (event.new[0] + event.new[1]) / 2
+                        pp_rt_tolerance.value = (event.new[1] - event.new[0]) / 2
+                        selection_change()
                 except Exception as e:
-                    self.outer_instance.status_text.value = "double_tap_input: " + str(e)
+                    self.outer_instance.status_text.value = "range_selection_input: " + str(e)
                     self.outer_instance.debug_text.value += traceback.format_exc() + "\n\n"
 
         selection_view = IntegrationSelection(outer_instance=self)
@@ -403,8 +373,6 @@ class module_class:
             try:
                 if len(plate_view.well_list) != 1:
                     self.status_text.value = "Please select only 1 well to analyze"
-                elif selection_view.selection_end == None:
-                    self.status_text.value = "Please ensure a peak span is set"
                 else:
                     plate = self.pp_plate_selector.value
                     well = plate_view.well_list[0]
@@ -514,7 +482,7 @@ class module_class:
             pn.Row(
                 pp_param_control_box, 
                 pn.Column(
-                    pn.pane.Markdown("<b>Double click on left and right of peak to select for integration (a little slow)</b>"),
+                    pn.pane.Markdown("<b>Use the box selection tool on the right to click-drag an integration region</b>"),
                     selection_view.plot.opts(width=500, height=250),
                     pn.pane.Markdown("<b>Click to show well chromatogram.  Double click to clear</b>"),
                     plate_view.plot.opts(width=500, height=325),
@@ -526,7 +494,7 @@ class module_class:
         
         #Event watchdogs and callbacks
         def selection_change():
-            if (selection_view.selection_end != None):
+            if (selection_view.selection_stream.boundsx[0] != None):
                 pp_integrate_plate_button.disabled = False
                 pp_integrate_library_button.disabled = False
                 pp_drift_correct_plate_button.disabled = False
@@ -639,7 +607,7 @@ class module_class:
                                 del plate_view.well_list[i]
                         plate_view.highlight_plot.event()
                     plate_view.plate_plot.event()
-                    selection_view.overlay_plot.event()
+                    selection_view.update_overlay_plot()
                     selection_view.integration_statistics_plot.event()
             except Exception as e:
                 self.debug_text.value += f"Well: {event.new}\t{type(event.new)}"
@@ -675,7 +643,6 @@ class module_class:
                         )
                         self.library[plate][well][compound].process_peak()
                     self.progress_bar.value = int(np.round((100 * i) / len(self.library[plate])))
-                selection_view.overlay_plot.event()
                 selection_view.integration_statistics_plot.event()
                 plate_view.plate_plot.event()
                 self.status_text.value = "Done integrating well!"
@@ -705,7 +672,6 @@ class module_class:
                         )
                         self.library[plate][well][compound].process_peak()
                     self.progress_bar.value = int(np.round((100 * i) / len(self.library[plate])))
-                selection_view.overlay_plot.event()
                 selection_view.integration_statistics_plot.event()
                 plate_view.plate_plot.event()
                 self.status_text.value = "Done integrating plate!"
@@ -735,7 +701,6 @@ class module_class:
                             )
                             self.library[plate][well][compound].process_peak()
                         self.progress_bar.value = int(np.round(100 * ((i/len(self.library)) + ((1/len(self.library)) * (j/len(self.library[plate]))))))
-                selection_view.overlay_plot.event()
                 selection_view.integration_statistics_plot.event()
                 plate_view.plate_plot.event()
                 self.status_text.value = "Done integrating library!"
@@ -757,8 +722,8 @@ class module_class:
                 maxima_times = []
                 for i, well in enumerate(plate_view.well_list):
                     if compound in self.library[plate][well]:
-                        time_start_ind = np.argmin(np.abs(selection_view.selection_start - self.library[plate][well][compound].time))
-                        time_end_ind = np.argmin(np.abs(selection_view.selection_end - self.library[plate][well][compound].time))
+                        time_start_ind = np.argmin(np.abs(pp_left_bound.value - self.library[plate][well][compound].time))
+                        time_end_ind = np.argmin(np.abs(pp_right_bound.value - self.library[plate][well][compound].time))
                         maxima_times.append(self.library[plate][well][compound].time[
                                 time_start_ind + np.argmax(gaussian_filter1d(self.library[plate][well][compound].intensity, sigma)[time_start_ind:time_end_ind])
                             ])
@@ -770,7 +735,7 @@ class module_class:
                     if compound in self.library[plate][well]:
                         self.library[plate][well][compound].drift_offset = (average_time - maxima_times[i])
                         self.progress_bar.value = int(np.round((100 * (i+1+n_wells)) / (n_wells*2)))
-                selection_view.overlay_plot.event()
+                selection_view.update_overlay_plot()
                 selection_view.integration_statistics_plot.event()
                 self.status_text.value = "Done applying drift correction to selection!"
         pp_drift_correct_selection_button.on_click(pp_drift_correct_selection_button_callback)
@@ -788,8 +753,8 @@ class module_class:
                 maxima_times = []
                 for i, well in enumerate(self.library[plate]):
                     if compound in self.library[plate][well]:
-                        time_start_ind = np.argmin(np.abs(selection_view.selection_start - self.library[plate][well][compound].time))
-                        time_end_ind = np.argmin(np.abs(selection_view.selection_end - self.library[plate][well][compound].time))
+                        time_start_ind = np.argmin(np.abs(pp_left_bound.value - self.library[plate][well][compound].time))
+                        time_end_ind = np.argmin(np.abs(pp_right_bound.value - self.library[plate][well][compound].time))
                         maxima_times.append(self.library[plate][well][compound].time[
                                 time_start_ind + np.argmax(gaussian_filter1d(self.library[plate][well][compound].intensity, sigma)[time_start_ind:time_end_ind])
                             ])
@@ -801,7 +766,7 @@ class module_class:
                     if compound in self.library[plate][well]:
                         self.library[plate][well][compound].drift_offset = (average_time - maxima_times[i])
                         self.progress_bar.value = int(np.round((100 * (i+1+n_wells)) / (n_wells*2)))
-                selection_view.overlay_plot.event()
+                selection_view.update_overlay_plot()
                 selection_view.integration_statistics_plot.event()
                 self.status_text.value = "Done applying drift correction to selection!"
         pp_drift_correct_plate_button.on_click(pp_drift_correct_plate_button_callback)
@@ -811,7 +776,7 @@ class module_class:
             compound = self.pp_compound_selector.value
             for well in plate_view.well_list:
                 self.library[plate][well][compound].drift_offset = 0
-            selection_view.overlay_plot.event()
+            selection_view.update_overlay_plot()
             selection_view.integration_statistics_plot.event()
         pp_clear_drift_correct_selection_button.on_click(pp_clear_drift_correct_selection_button_callback)
 
@@ -820,7 +785,7 @@ class module_class:
             compound = self.pp_compound_selector.value
             for well in self.library[plate]:
                 self.library[plate][well][compound].drift_offset = 0
-            selection_view.overlay_plot.event()
+            selection_view.update_overlay_plot()
             selection_view.integration_statistics_plot.event()
         pp_clear_drift_correct_plate_button.on_click(pp_clear_drift_correct_plate_button_callback)
 
