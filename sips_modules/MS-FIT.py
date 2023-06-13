@@ -81,6 +81,8 @@ class module_class:
         pp_drop_baseline_checkbox = pn.widgets.Checkbox(name="Drop Baseline", width=80)
         pp_drift_correct_selection_button = pn.widgets.Button(name='Selected', width=80, disabled=True, button_type='primary')
         pp_drift_correct_plate_button = pn.widgets.Button(name='Plate', width=80, disabled=True, button_type='primary')
+        pp_clear_drift_correct_selection_button = pn.widgets.Button(name='Clear Sel.', width=80, disabled=True, button_type='danger')
+        pp_clear_drift_correct_plate_button = pn.widgets.Button(name='Clear Plate', width=80, button_type='danger')
         pp_integrate_selection_button = pn.widgets.Button(name='Selected', width=80, disabled=True, button_type='primary')
         pp_integrate_plate_button = pn.widgets.Button(name='Plate', width=80, disabled=True, button_type='primary')
         pp_integrate_library_button = pn.widgets.Button(name='Library', width=80, disabled=True, button_type='primary')
@@ -484,6 +486,8 @@ class module_class:
                     pn.pane.Markdown("<b>Drift Corr.</b></br> "),
                     pp_drift_correct_selection_button,
                     pp_drift_correct_plate_button,
+                    pp_clear_drift_correct_selection_button,
+                    pp_clear_drift_correct_plate_button,
                 )
             )
         )
@@ -540,6 +544,12 @@ class module_class:
                 pp_integrate_library_button.disabled = True
                 pp_drift_correct_selection_button.disabled = True
                 pp_drift_correct_plate_button.disabled = True
+
+            if len(plate_view.well_list) > 0:
+                pp_clear_drift_correct_selection_button.disabled = False
+            else:
+                pp_clear_drift_correct_selection_button.disabled = True
+                
 
             def out_format(v1, v2=None):
                 if v2 != None:
@@ -767,7 +777,7 @@ class module_class:
 
         def pp_drift_correct_plate_button_callback(event):
             plate = self.pp_plate_selector.value
-            compound = self.pp_compound_selector.values
+            compound = self.pp_compound_selector.value
             sigma = pp_sigma_input.value
             n_wells = len(self.library[plate])
             if n_wells < 2:
@@ -795,6 +805,24 @@ class module_class:
                 selection_view.integration_statistics_plot.event()
                 self.status_text.value = "Done applying drift correction to selection!"
         pp_drift_correct_plate_button.on_click(pp_drift_correct_plate_button_callback)
+
+        def pp_clear_drift_correct_selection_button_callback(event):
+            plate = self.pp_plate_selector.value
+            compound = self.pp_compound_selector.value
+            for well in plate_view.well_list:
+                self.library[plate][well][compound].drift_offset = 0
+            selection_view.overlay_plot.event()
+            selection_view.integration_statistics_plot.event()
+        pp_clear_drift_correct_selection_button.on_click(pp_clear_drift_correct_selection_button_callback)
+
+        def pp_clear_drift_correct_plate_button_callback(event):
+            plate = self.pp_plate_selector.value
+            compound = self.pp_compound_selector.value
+            for well in self.library[plate]:
+                self.library[plate][well][compound].drift_offset = 0
+            selection_view.overlay_plot.event()
+            selection_view.integration_statistics_plot.event()
+        pp_clear_drift_correct_plate_button.on_click(pp_clear_drift_correct_plate_button_callback)
 
         def pp_cwt_analysis_button_callback(event):
             cwt_analysis_plot.event()
