@@ -316,6 +316,7 @@ class module_class:
                         ]
                     else:
                         plots = []
+                        alpha_val = 1/len(plate_view.well_list)
                         for i, well in enumerate(plate_view.well_list, 1):
                             #Make sure the compound is in the well
                             if compound in self.outer_instance.library[plate][well]:
@@ -333,9 +334,9 @@ class module_class:
                                     midpoint_ind = np.argmin(np.abs(x - self.outer_instance.library[plate][well][compound].rt))
                                     #Add our plots
                                     plots += [
-                                        hv.Area((x, baseline_y, y_top), kdims='x', vdims=['y', 'y1']).opts(color='#808080'),
-                                        hv.Curve((x, baseline_y)).opts(color='#FF0000'),
-                                        hv.Curve(([x[midpoint_ind], x[midpoint_ind]], [baseline_y[midpoint_ind], y_top[midpoint_ind]])).opts(color='#FF0000')
+                                        hv.Area((x, baseline_y, y_top), kdims='x', vdims=['y', 'y1']).opts(color='#808080', alpha=alpha_val),
+                                        hv.Curve((x, baseline_y)).opts(color='#FF0000', alpha=alpha_val),
+                                        hv.Curve(([x[midpoint_ind], x[midpoint_ind]], [baseline_y[midpoint_ind], y_top[midpoint_ind]])).opts(color='#FF0000', alpha=alpha_val)
                                     ]
                             self.outer_instance.progress_bar.value = int(np.round((i * 100) / len(plate_view.well_list)))
                     #Display our overlaid plots
