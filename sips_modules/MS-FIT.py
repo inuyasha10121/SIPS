@@ -22,18 +22,38 @@ sidebar_text = """### MS-FIT
 This pane is responsible for processing and integrating chromatography data.  
 
 * The upper plot shows an overlay of all the chromatographs of the specified compound in the plate, or any chromatographs from selected wells
-* The middle plot shows a heatmap of the integrated plate peak areas.  If a well is not present, it will be gray.  If a well is selected, it will be bordered in white.
-* The advanced tab allows for showing the Continuous Wavelet Transform results, as well as fine tuning of parameters (see documentation)
-
+  * Use the "Box Select" tool (right side toolbar) to specify an integration region for the compound, which will be shown in blue
+  * If integration data is available, the integration regions, baselines, and peak heights will also be displayed
+* The middle plot shows a plate heatmap of the integrated peak areas.
+  * If a well is not present, it will be gray.  
+  * If a well has not been integrated yet, it will be white.
+  * Select subsets of wells to view in the upper plot by clicking them.  Clicking again will de-select the well.  If a well is selected, it will be bordered in white.
+* The advanced tab allows for showing the Continuous Wavelet Transform (CWT) results, as well as fine tuning of parameters (see documentation)
+* On the left:
+  * "Selected" applies the specified processing to any wells you have selected, and only becomes available when wells are selected
+  * "Plate" applies the specified processing to all available wells in the plate
+  * "Library" applies the specified processing to all plates in the library
 
 The workflow for processing data is as follows:
 
-* Double click to the left and right of a peak bundle to select that region for analysis
-* Change the "Smoothing" factor to create smooth gaussian peaks
-* Increasing the "Friction threshold" will cause the baseline to creep up the peak.  This can avoid the baseline drifing far from the peak.
-* "Drop baseline" will force the integration baseline to drop to zero.  Useful for split peaks.
-* If available, standard curve conversion can be specified with a slope and intercept.
-* 
+* Load the desired plate and compound using the dropdown menus
+* Change the "Smoothing Factor" to make smooth gaussian peaks
+* If available, slope/intercept information from a standard curve can also be provided
+* Select an integration region in the upper plot using the "Box Select" tool
+* If the peaks are poorly grouped, you can use "Drift Corr." to align the peaks and re-specify the integration region
+* Run an initial integration, then select a few wells to see how well the integration performed
+* If the peak edges are very far from the peak, you can increase "Friction Threshold" to reduce by how much the initial bounds are moved
+* If your peak is co-eluting, "Drop baseline" can be used to avoid steep baselines
+* If proper integration is still failing, you can open the 'Advanced' menu to fine tune parameters
+  * "Retention Time" specifies the center of the peak search area.  This should be close to the center of your peaks.
+  * "Retention Time Tolerance" specifies the maximumm distance away from the retention time that a peak will likely to be chosen.
+  * "Left Bound" specifies the initial left bound of the peak, which is then relaxed and optimized
+  * "Right Bound" specifies the initial right bound of the peak, which is then relaxed and optimized
+  * "CWT Min Scale" specifies the minimum scale used in the CWT analysis.  The smaller the value, the more small features will be considered peaks
+  * "CWT Max Scale" specifies the maximum scale used in the CWT analysis.  The larger the value, the more large features will be considered peaks
+  * "CWT Neighborhood" specifies how many neighboring pixles are checked when searching for local minima/maxima.  Increasing this can reduce the number of false peaks/edges
+  * "CWT Analysis" shows the CWT analysis data for a single selected well.  Detected peaks are indicated by yellow regions, while detected valleys (peak edges) are indicated by dark blue regions.
+    * Ideally, you should see a strong yellow region flanked by strong dark blue regions.  If you don't see this, try increasing the "Smoothing Factor" to make the peaks more gaussian in shape.
 """
 
 class module_class:
@@ -482,7 +502,7 @@ class module_class:
             pn.Row(
                 pp_param_control_box, 
                 pn.Column(
-                    pn.pane.Markdown("<b>Use the box selection tool on the right to click-drag an integration region</b>"),
+                    pn.pane.Markdown("<b>Use the \"Box Select\" tool on the right to click-drag an integration region</b>"),
                     selection_view.plot.opts(width=500, height=250),
                     pn.pane.Markdown("<b>Click to show well chromatogram.  Double click to clear</b>"),
                     plate_view.plot.opts(width=500, height=325),
