@@ -98,6 +98,9 @@ export class DataSelectionTableView extends InputWidgetView {
                     var closest = this.model.wavelengths_3d[source_val].reduce(function(prev: number, curr: number) {
                         return (Math.abs(curr - new_value) < Math.abs(prev - new_value) ? curr : prev);
                     });
+                    console.log(this.model.wavelengths_3d)
+                    console.log(source_val)
+                    console.log(closest)
                     targ.value = closest.toString();
                     //Store changed value
                     this.model.targets[(this.model.curr_page * this.model.cells_per_page) + cell_ind] = targ.value;

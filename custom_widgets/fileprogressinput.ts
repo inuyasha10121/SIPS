@@ -22,15 +22,20 @@ interface EmpowerFile extends File {
 class WorkerPool {
     max_workers: number
     worker_pool: Worker[]
-    constructor(){
+    context: FileProgressInputView
+    num_tasks: number
+
+    constructor(context: FileProgressInputView){
         this.max_workers = Math.max(navigator.hardwareConcurrency, 4);
         this.worker_pool = [];
+        this.context = context;
+        this.num_tasks = 0;
     }
-    _init_pool(worker_func: Function, num_tasks: number): void {
+    _init_pool(worker_func: Function): void {
         const func_str = worker_func.toString();
         const funcBody = func_str.substring( func_str.indexOf( '{' ) + 1, func_str.lastIndexOf( '}' ) );
         const workerSourceURL = URL.createObjectURL( new Blob( [ funcBody ] ) );
-        const num_workers = Math.min(num_tasks, this.max_workers)
+        const num_workers = Math.min(this.num_tasks, this.max_workers)
         for (let i = 0; i < num_workers; i++){
             this.worker_pool.push(new Worker(workerSourceURL))
         }
@@ -44,6 +49,11 @@ class WorkerPool {
     _task_worker(worker: Worker, input_data: any): Promise<any> {
         return new Promise((resolve, reject) => {
             worker.addEventListener('message', (event) => {
+                //TODO: Eventually, it might be better to display progress on each file, instead of each worker, resolve
+                this.context.current_progress += 1 / this.worker_pool.length
+                this.context.model.setv({
+                    progress_percent: Math.round(100 * this.context.current_progress)
+                })
                 resolve(event.data)
             })
             worker.addEventListener('error', (event) => {
@@ -53,15 +63,17 @@ class WorkerPool {
         })
     }
     async task_pool(worker_func: Function, task_arr: Array<any>, additional_data: any[]|null = null): Promise<any[]> {
-        this._init_pool(worker_func, task_arr.length)
+        this.num_tasks = task_arr.length
+        this.context.current_progress = 0
+        this._init_pool(worker_func)
         const tasks = this.worker_pool.map((worker, index) => {
             const task_data = task_arr.filter((_, i) => i % this.worker_pool.length === index)
+            console.log(task_data)
             if (additional_data != null){
                 return this._task_worker(worker, task_data.concat(additional_data))
             } else {
                 return this._task_worker(worker, task_data)
             }
-            
         })
         let final_results: any[] = []
         try {
@@ -97,7 +109,7 @@ export class FileProgressInputView extends InputWidgetView {
         
         const self = this
         if (this.worker_pool == null){
-            this.worker_pool = new WorkerPool()
+            this.worker_pool = new WorkerPool(self)
         }
         if (this.num_files == null){
             this.num_files = 0
@@ -205,10 +217,10 @@ export class FileProgressInputView extends InputWidgetView {
             reader.onload = () => {
                 const {result} = reader
                 if (result != null) {
-                    //this.current_progress += 1 / (this.num_files * 2)
-                    //this.model.setv({
-                    //    progress_percent: Math.round(100 * this.current_progress)
-                    //})
+                    this.current_progress += 1 / (this.num_files * 2)
+                    this.model.setv({
+                        progress_percent: Math.round(100 * this.current_progress)
+                    })
                     //console.log("File read")
                     resolve([file, result as string])
                 } else {
@@ -237,15 +249,15 @@ export class FileProgressInputView extends InputWidgetView {
         //Choose what to do based on file type
         switch (ext){
             case 'arw':
+                const self = this;
                 function _extract_empower_params(file: EmpowerFile, content: string): Promise<EmpowerFile>{
                     return new Promise<EmpowerFile>((resolve, reject) => {
                         if (content != null){
-                            //const self = this
                             function progress_resolve(file: EmpowerFile): void{
-                                //self.current_progress += 1 / (self.num_files * 2)
-                                //self.model.setv({
-                                //    progress_percent: Math.round(100 * self.current_progress)
-                                //})
+                                self.current_progress += 1 / (self.num_files * 2)
+                                self.model.setv({
+                                    progress_percent: Math.round(100 * self.current_progress)
+                                })
                                 //console.log('Params parsed')
                                 resolve(file)
                             }
@@ -284,7 +296,7 @@ export class FileProgressInputView extends InputWidgetView {
             
                             if (channel_desc.includes('QDa')){
                                 if (channel_desc.includes('Scan')) {
-                                    file.wavelengths = content_lines[2].split(/\s/g).slice(1).map(parseFloat);
+                                    file.wavelengths = content_lines[2].split(/\s+/g).slice(1).map(parseFloat);
                                     file.content3d = true
                                     if (channel_desc.includes('Positive')){
                                         file.tag = '(+)MS Scan'
@@ -310,7 +322,7 @@ export class FileProgressInputView extends InputWidgetView {
                                 }
                             } else if (channel_desc.includes('PDA')) {
                                 if (channel_desc.includes('Spectrum')) {
-                                    file.wavelengths = content_lines[2].split(/\s/g).slice(1).map(parseFloat);
+                                    file.wavelengths = content_lines[2].split(/\s+/g).slice(1).map(parseFloat);
                                     file.content3d = false
                                     file.tag = `PDA Scan`
                                     progress_resolve(file)
@@ -451,11 +463,6 @@ export class FileProgressInputView extends InputWidgetView {
                             reader.onload = () => {
                                 const {result} = reader
                                 if (result != null) {
-                                    //this.current_progress += 1 / (this.num_files * 2)
-                                    //this.model.setv({
-                                    //    progress_percent: Math.round(100 * this.current_progress)
-                                    //})
-                                    //console.log(`File read: ${file.name}`)
                                     resolve(result as string)
                                 } else {
                                     reject(reader.error ?? new Error(`unable to read '${file.name}'`))
@@ -472,17 +479,12 @@ export class FileProgressInputView extends InputWidgetView {
                         return new Promise((resolve) => {
                             //const self = this
                             function progress_resolve(parsed_data: [string, string, string, string, number[], number[]][]): void{
-                                //self.current_progress += 1 / (self.num_files * 2)
-                                //self.model.setv({
-                                //    progress_percent: Math.round(100 * self.current_progress)
-                                //})
-                                //console.log("Data harvested")
                                 resolve(parsed_data)
                             }
                 
                             function parse_data(array: string[]): number[][] {
                                 let values = array.map(line => {
-                                    return line.split(/\s/g).map(num => {
+                                    return line.split(/\s+/g).map(num => {
                                       return parseFloat(num)
                                   })
                                 })
@@ -513,7 +515,7 @@ export class FileProgressInputView extends InputWidgetView {
                             let wavelengths: number[] = []
                             if (channel_desc.includes('QDa')){
                                 if (channel_desc.includes('Scan')) {
-                                    wavelengths = content_lines[2].split(/\s/g).slice(1).map(parseFloat);
+                                    wavelengths = content_lines[2].split(/\s+/g).slice(1).map(parseFloat);
                                     if (channel_desc.includes('Positive')){
                                         tag = '(+)MS Scan'
                                     } else if (channel_desc.includes('Negative')){
@@ -530,7 +532,7 @@ export class FileProgressInputView extends InputWidgetView {
                                 }
                             } else if (channel_desc.includes('PDA')) {
                                 if (channel_desc.includes('Spectrum')) {
-                                    wavelengths = content_lines[2].split(/\s/g).slice(1).map(parseFloat);
+                                    wavelengths = content_lines[2].split(/\s+/g).slice(1).map(parseFloat);
                                     tag = `PDA Scan`
                                 } else if (channel_desc.includes('@')) {
                                     const desc_split = channel_desc.split(/[ ,]+/g)
@@ -631,9 +633,7 @@ export namespace FileProgressInput {
     progress_state: p.Property<number>,
     progress_percent: p.Property<number>,
     progress_status: p.Property<string>,
-    //file_params: p.Property<string[]>,
     file_type: p.Property<string>,
-    //file_wavelengths: p.Property<{ [key: string]: number[] }>,
     harvest: p.Property<boolean>,
     transfered_text: p.Property<string[][]>,
     transfered_data: p.Property<number[][][]>
@@ -657,9 +657,7 @@ export class FileProgressInput extends InputWidget {
         progress_state:   [ Number, 0],
         progress_percent: [ Number, 0],
         progress_status:  [ String, "" ],
-        //file_params:      [ Array(String), [""] ],
         file_type:        [ String, "" ],
-        //file_wavelengths: [ Dict(Array(Number)), {} ],
         harvest:          [ Boolean, false ],
         transfered_text:  [ Array(Tuple(String)), [[""]]],
         transfered_data:  [ Array(Array(Tuple(Number))), [[[0]]] ]
