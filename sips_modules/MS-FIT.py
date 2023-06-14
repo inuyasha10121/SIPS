@@ -21,7 +21,7 @@ from .PlateClass import Library
 sidebar_text = """### MS-FIT
 This pane is responsible for processing and integrating chromatography data.  
 
-* The upper plot shows an overlay of all the chromatographs of the specified compound in the plate, or any chromatographs from selected wells
+* The upper plot shows an overlay of all the chromatograms of the specified compound in the plate, or any chromatograms from selected wells
   * Use the "Box Select" tool (right side toolbar) to specify an integration region for the compound, which will be shown in blue
   * If integration data is available, the integration regions, baselines, and peak heights will also be displayed
 * The middle plot shows a plate heatmap of the integrated peak areas.
@@ -304,10 +304,10 @@ class module_class:
                         for i, well in enumerate(well_list, 1):
                             #Make sure the compound is in the well
                             if compound in self.outer_instance.library[plate][well]:
-                                #Get our time and smoothed chromatograph
+                                #Get our time and smoothed chromatogram
                                 x = self.outer_instance.library[plate][well][compound].time + self.outer_instance.library[plate][well][compound].drift_offset
                                 y = gaussian_filter1d(self.outer_instance.library[plate][well][compound].intensity, pp_sigma_input.value)
-                                #Add the chromatograph curve to our dictionary
+                                #Add the chromatogram curve to our dictionary
                                 plots[well] = hv.Curve((x,y))
                             self.outer_instance.progress_bar.value = int(np.round((i * 100) / len(well_list)))
                         self.outer_instance.status_text.value = f"Displaying overlay..."
@@ -634,6 +634,14 @@ class module_class:
                 self.status_text.value = "pp_compound_selector_watchdog: " + str(e)
                 self.debug_text.value += traceback.format_exc() + "\n\n"
         self.pp_compound_selector.param.watch(pp_compound_selector_watchdog, ['value'], onlychanged=False)
+
+        def pp_sigma_input_watchdog(event):
+            try:
+                selection_view.update_overlay_plot()
+            except Exception as e:
+                self.status_text.value = "pp_sigma_input_watchdog: " + str(e)
+                self.debug_text.value += traceback.format_exc() + "\n\n"
+        pp_sigma_input.param.watch(pp_sigma_input_watchdog, ['value'], onlychanged=False)
 
         def pp_integrate_selection_button_callback(event):
             try:
