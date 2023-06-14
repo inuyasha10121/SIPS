@@ -144,9 +144,13 @@ class module_class:
                 
         
         pp_download_csv_button = pn.widgets.FileDownload(
+            name='Download',
             callback=download_data_csv_callback, filename='library_integration_data.csv',
-            width = 250, button_type='primary'
+            width = 125, button_type='primary', label='Download .csv'
         )
+
+        pp_download_filename = pn.widgets.TextInput(name='Filename:', placeholder='library_integration_data.csv', width=200)
+        
 
         class PlateView(param.Parameterized):
             color_map = param.Parameter(default = palettes.Viridis256)
@@ -497,6 +501,7 @@ class module_class:
             pn.Row(
                 self.pp_plate_selector, 
                 self.pp_compound_selector,
+                pp_download_filename,
                 pp_download_csv_button,
             ), 
             pn.Row(
@@ -597,6 +602,15 @@ class module_class:
                         pp_peak_stcurve_area.value = out_format(np.average(stcurve_areas), np.std(stcurve_areas))
                     else:
                         pp_peak_stcurve_area.value = "N/A"
+
+        def pp_download_filename_watchdog(event):
+            if (event.new == "") or (event.new == None):
+                pp_download_csv_button.filename = 'library_integration_data.csv'
+            elif not event.new.endswith('.csv'):
+                pp_download_csv_button.filename = f"{event.new}.csv"
+            else:
+                pp_download_csv_button.filename = event.new
+        pp_download_filename.param.watch(pp_download_filename_watchdog, ['value'], onlychanged=False)
 
         def pp_plate_selector_watchdog(event):
             try:
