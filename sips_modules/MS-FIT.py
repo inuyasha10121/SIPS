@@ -125,14 +125,16 @@ class module_class:
                 columns = ['Plate', 'Well'] + list(compounds)
                 n_columns = len(columns)
                 #Harvest our data
+                well_order = [f"{chr(65+i)}{str(j).zfill(2)}" for j in range(1,13) for i in range(8)]
                 data = []
                 for plate in self.library:
-                    for well in self.library[plate]:
-                        data.append(['' for _ in range(n_columns)])
-                        data[-1][0] = plate
-                        data[-1][1] = well
-                        for compound in self.library[plate][well]:
-                            data[-1][columns.index(compound)] = self.library[plate][well][compound].peak_area
+                    for well in well_order:
+                        if well in self.library[plate]:
+                            data.append(['' for _ in range(n_columns)])
+                            data[-1][0] = plate
+                            data[-1][1] = well
+                            for compound in self.library[plate][well]:
+                                data[-1][columns.index(compound)] = self.library[plate][well][compound].peak_area
                 #Send a stream to the file download widget
                 sio = StringIO()
                 pd.DataFrame(data, columns=columns).to_csv(sio, index=False)
@@ -151,6 +153,40 @@ class module_class:
 
         pp_download_filename = pn.widgets.TextInput(name='Filename:', placeholder='library_integration_data.csv', width=200)
         
+        def download_data_plate_callback():
+            try:
+                #First, get all our compounds
+                compounds = set()
+                for plate in self.library:
+                    for well in self.library[plate]:
+                        compounds.update(set(self.library[plate][well]))
+                columns = ['Plate', 'Well'] + list(compounds)
+                n_columns = len(columns)
+                #Harvest our data
+                data = []
+                for plate in self.library:
+                    for well in self.library[plate]:
+                        data.append(['' for _ in range(n_columns)])
+                        data[-1][0] = plate
+                        data[-1][1] = well
+                        for compound in self.library[plate][well]:
+                            data[-1][columns.index(compound)] = self.library[plate][well][compound].peak_area
+                #Send a stream to the file download widget
+                sio = StringIO()
+                pd.DataFrame(data, columns=columns).to_csv(sio, index=False)
+                sio.seek(0)
+                return sio
+            except Exception as e:
+                self.status_text.value = "download_data_plate_callback: " + str(e)
+                self.debug_text.value += traceback.format_exc() + "\n\n"
+                
+        
+        pp_download_plate_button = pn.widgets.FileDownload(
+            name='Download',
+            callback=download_data_plate_callback, filename='plate.png',
+            width = 125, button_type='primary', label='Download .png'
+        )
+
 
         class PlateView(param.Parameterized):
             color_map = param.Parameter(default = palettes.Viridis256)
