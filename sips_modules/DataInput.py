@@ -23,8 +23,10 @@ If a plate needs to be deleted, simply select the plate from the dropdown and cl
 
 As you input data, panels will pop up if additional information is required with guidance on how to input this data.
 
-* Chromatography data require specifying compounds, usually the name of a starting material or formed product
-* 3D chromatography data also require search targets (wavelength or m/z values) for the target(s)
+* For chromatography data:
+  * Add compound names to the "Compound" column
+  * Pick a data source from the "Source" dropdowns that the compound should come from
+  * If the source is a 3D data channel, specify the wavelength or m/z value to extract from the 3D data
 
 
 Please wait patiently for data to load (watch the loading indicators, including the upper right wheel, and status bar), some data takes quite a while to process and transfer to the server.
