@@ -107,6 +107,7 @@ class module_class:
         pp_integrate_plate_button = pn.widgets.Button(name='Plate', width=80, disabled=True, button_type='primary')
         pp_integrate_library_button = pn.widgets.Button(name='Library', width=80, disabled=True, button_type='primary')
         
+        pp_peak_source_display = pn.widgets.TextInput(name='Source', width=150, disabled=True)
         pp_peak_rt_display = pn.widgets.TextInput(name='Retention Time', width=150, disabled=True)
         pp_peak_area_display = pn.widgets.TextInput(name='Area', width=150, disabled=True)
         pp_peak_height_display = pn.widgets.TextInput(name='Height', width=150, disabled=True)
@@ -519,7 +520,7 @@ class module_class:
                 )
             )
         )
-        pp_peak_features_box = pn.WidgetBox('Calculated Peak<br>Features', pp_peak_rt_display,
+        pp_peak_features_box = pn.WidgetBox(pp_peak_source_display, 'Calculated Peak<br>Features', pp_peak_rt_display,
                                 pp_peak_area_display, pp_peak_height_display, pp_peak_snr_display,
                                 pp_peak_stcurve_area
                                 )
@@ -597,6 +598,7 @@ class module_class:
             disp_well_list = [well for well in plate_view.well_list if self.library[plate][well][compound].peak_area != None]
 
             if len(disp_well_list) == 0:
+                pp_peak_source_display.value = ""
                 pp_peak_rt_display.value = ""
                 pp_peak_area_display.value = ""
                 pp_peak_height_display.value = ""
@@ -605,6 +607,7 @@ class module_class:
             else:
                 if len(disp_well_list) == 1:
                     well = disp_well_list[0]
+                    pp_peak_source_display.value = self.library[plate][well][compound].source
                     pp_peak_rt_display.value = out_format(self.library[plate][well][compound].peak_rt)
                     pp_peak_area_display.value = out_format(self.library[plate][well][compound].peak_area)
                     pp_peak_height_display.value = out_format(self.library[plate][well][compound].peak_height)
@@ -621,6 +624,7 @@ class module_class:
                     snrs = np.zeros(n_wells)
                     stcurve_areas = np.zeros(n_wells)
                     all_stcurve = True
+                    pp_peak_source_display.value = ", ".join([self.library[plate][well][compound] for well in disp_well_list])
                     for i, well in enumerate(disp_well_list):
                         rts[i] = self.library[plate][well][compound].peak_rt
                         areas[i] = self.library[plate][well][compound].peak_area
