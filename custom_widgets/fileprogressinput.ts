@@ -613,7 +613,7 @@ export class FileProgressInputView extends InputWidgetView {
                     this.model.setv({
                         progress_state: 2,
                         progress_percent: 0,
-                        progress_status: 'Transfer complete, storing data...'
+                        progress_status: 'Transfer complete!'
                     })
                 })
             } else {

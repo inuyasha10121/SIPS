@@ -123,7 +123,7 @@ class module_class:
                 for plate in self.library:
                     for well in self.library[plate]:
                         compounds.update(set(self.library[plate][well]))
-                columns = ['Plate', 'Well'] + list(compounds)
+                columns = ['Plate', 'Well', 'Sample'] + list(compounds)
                 n_columns = len(columns)
                 #Harvest our data
                 well_order = [f"{chr(65+i)}{str(j).zfill(2)}" for j in range(1,13) for i in range(8)]
@@ -134,7 +134,10 @@ class module_class:
                             data.append(['' for _ in range(n_columns)])
                             data[-1][0] = plate
                             data[-1][1] = well
+                            
                             for compound in self.library[plate][well]:
+                                if self.library[plate][well][compound].sample_name != None:
+                                    data[-1][2] = self.library[plate][well][compound].sample_name
                                 data[-1][columns.index(compound)] = self.library[plate][well][compound].peak_area
                 #Send a stream to the file download widget
                 sio = StringIO()
