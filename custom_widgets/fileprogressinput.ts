@@ -68,7 +68,6 @@ class WorkerPool {
         this._init_pool(worker_func)
         const tasks = this.worker_pool.map((worker, index) => {
             const task_data = task_arr.filter((_, i) => i % this.worker_pool.length === index)
-            console.log(task_data)
             if (additional_data != null){
                 return this._task_worker(worker, task_data.concat(additional_data))
             } else {
@@ -100,6 +99,9 @@ export class FileProgressInputView extends InputWidgetView {
 
         this.connect(this.model.properties.harvest.change, () => {
             this.current_progress = 0;
+            this.model.setv({
+                progress_status: "Reading data, this may take a while...",
+            });
             this.harvest_data();
         });
     }
@@ -221,7 +223,6 @@ export class FileProgressInputView extends InputWidgetView {
                     this.model.setv({
                         progress_percent: Math.round(100 * this.current_progress)
                     })
-                    //console.log("File read")
                     resolve([file, result as string])
                 } else {
                     reject(reader.error ?? new Error(`unable to read '${file.name}'`))
@@ -258,7 +259,6 @@ export class FileProgressInputView extends InputWidgetView {
                                 self.model.setv({
                                     progress_percent: Math.round(100 * self.current_progress)
                                 })
-                                //console.log('Params parsed')
                                 resolve(file)
                             }
                             //First, check to see if we have the necessary information in the header
@@ -422,7 +422,6 @@ export class FileProgressInputView extends InputWidgetView {
         if (this.model.document != null){
             let dst_model = this.model.document.get_model_by_name('bk_fi_target_table')
             if (dst_model != null){
-                //console.log("Pulling dst values")
                 let dst_compounds = (dst_model.attributes.compounds as string[])
                 let dst_sources = (dst_model.attributes.sources as string[])
                 let dst_targets = (dst_model.attributes.targets as string[])
@@ -454,9 +453,180 @@ export class FileProgressInputView extends InputWidgetView {
                     progress_percent: 0,
                     progress_status: 'Harvesting requested data...'
                 })
-                //console.log("Parsing files")
 
-                function harvest_empower_data(){
+                //function harvest_empower_data(){
+                //    async function _read_file_text(file: File): Promise<string> {
+                //        return new Promise<string>((resolve, reject) => {
+                //            const reader = new FileReader()
+                //            reader.onload = () => {
+                //                const {result} = reader
+                //                if (result != null) {
+                //                    resolve(result as string)
+                //                } else {
+                //                    reject(reader.error ?? new Error(`unable to read '${file.name}'`))
+                //                }
+                //            }
+                //            reader.onerror = () => {
+                //                reject(new Error(`Error reading '${file.name}'`));
+                //            }
+                //            reader.readAsText(file);
+                //        })
+                //    }
+                //    
+                //    async function _harvest_empower_file(content: string, harvest_compounds: string[], harvest_sources: string[], harvest_targets: number[]): Promise<[string, string, string, string, number[], number[]][]> {
+                //        return new Promise((resolve) => {
+                //            //const self = this
+                //            function progress_resolve(parsed_data: [string, string, string, string, number[], number[]][]): void{
+                //                console.log("PARSED DATA")
+                //                parsed_data.forEach(function (row) {
+                //                    console.log(`${row[0]}\t${row[1]}\t${row[2]}\t${row[3]}\t${row[4].length}\t${row[5].length}`)
+                //                })
+                //                resolve(parsed_data)
+                //            }
+                //
+                //            function parse_data(array: string[]): number[][] {
+                //                let values = array.map(line => {
+                //                    return line.split(/\s+/g).map(num => {
+                //                      return parseFloat(num)
+                //                  })
+                //                })
+                //                return values.map((_, colIndex) => values.map(row => row[colIndex]));
+                //            }
+                //            
+                //            //Re-extract our relevant parameters from the header
+                //            //First, check to see if we have the necessary information in the header
+                //            let content_lines = content.split(/[\x0D\x0a]+/g)
+                //            const header_labels = (content_lines[0].match(/(?:"[^"]*"|\S+)/g) as RegExpMatchArray)
+                //            const header_content = (content_lines[1].match(/(?:"[^"]*"|\S+)/g) as RegExpMatchArray)
+                //            
+                //            const vial_ind = header_labels.indexOf("\"Vial\"")
+                //            let vial_bits = header_content[vial_ind].slice(3, -1).split(',')
+                //            vial_bits[1] = vial_bits[1].padStart(2, '0')
+                //            const well = vial_bits[0] + vial_bits[1]
+                //            
+                //            let sample_name = ""
+                //            const sample_ind = header_labels.indexOf("\"SampleName\"")
+                //            if (sample_ind != -1) {
+                //                sample_name = header_content[sample_ind].slice(1, -1)
+                //            }
+                //            
+                //            const channel_ind = header_labels.indexOf("\"Channel Description\"")
+                //            const channel_desc = header_content[channel_ind]
+//
+                //            let tag = ""
+                //            let wavelengths: number[] = []
+                //            if (channel_desc.includes('QDa')){
+                //                if (channel_desc.includes('Scan')) {
+                //                    wavelengths = content_lines[2].split(/\s+/g).slice(1).map(parseFloat);
+                //                    if (channel_desc.includes('Positive')){
+                //                        tag = '(+)MS Scan'
+                //                    } else if (channel_desc.includes('Negative')){
+                //                        tag = '(-)MS Scan'
+                //                    }
+                //                } else if (channel_desc.includes('SIR')){
+                //                    const desc_split = channel_desc.split(/[ ,]+/g)
+                //                    const sir_mz = desc_split[desc_split.indexOf('Da')-1]
+                //                    if (channel_desc.includes('Positive')){
+                //                        tag = `(+)SIR ${sir_mz} m/z`
+                //                    } else if (channel_desc.includes('Negative')){
+                //                        tag = `(-)SIR ${sir_mz} m/z`
+                //                    }
+                //                }
+                //            } else if (channel_desc.includes('PDA')) {
+                //                if (channel_desc.includes('Spectrum')) {
+                //                    wavelengths = content_lines[2].split(/\s+/g).slice(1).map(parseFloat);
+                //                    tag = `PDA Scan`
+                //                } else if (channel_desc.includes('@')) {
+                //                    const desc_split = channel_desc.split(/[ ,]+/g)
+                //                    const wl_ind = desc_split.findIndex(el => el.includes('@'))
+                //                    const wl = desc_split[wl_ind].split('@')[0]
+                //                    tag = wl
+                //                }
+                //            }
+                //            
+//
+                //            //Go through all our harvested sources
+                //            let results: [string, string, string, string, number[], number[]][] = []
+                //            for (let i = 0; i < harvest_sources.length; i++){
+                //                //Check if the file source matches
+                //                if (harvest_sources[i] == tag){
+                //                    let compound = harvest_compounds[i]
+                //                    //Check for 3D or 2D data
+                //                    if (wavelengths.length > 0){
+                //                        let parsed_content = parse_data(content_lines.slice(4, -1))
+                //                        let target = harvest_targets[i]
+                //                        //Make our tag more descriptive
+                //                        let new_tag = ""
+                //                        if (tag.includes('MS')){
+                //                            new_tag = `${tag.substring(0, 3)}XIC ${target} m/z`
+                //                        } else {
+                //                            new_tag = `XAC ${target} nm`
+                //                        }
+                //                        //Find the closest wavelength or m/z to the target
+                //                        function find_closest(arr: number[], target: number): number{
+                //                            let diff = Math.abs(arr[0] - target)
+                //                            let best = 0
+                //                            for (let i = 1; i < arr.length; i++){
+                //                                if (Math.abs(arr[i] - target) < diff){
+                //                                    best = i
+                //                                }
+                //                            }
+                //                            return best
+                //                        }
+                //                        let closest_wl_ind = find_closest(wavelengths, target)
+                //                        results.push([sample_name, well, compound, new_tag, parsed_content[0], parsed_content[closest_wl_ind]])
+                //                    } else {
+                //                        let parsed_content = parse_data(content_lines.slice(2, -1))
+                //                        //Easy push
+                //                        results.push([sample_name, well, compound, tag, parsed_content[0], parsed_content[1]])
+                //                    }
+                //                }
+                //            }
+                //            progress_resolve(results)
+                //        });
+                //    }
+                //    
+                //    self.addEventListener('message', async (event) => {
+                //        const files: EmpowerFile[] = event.data.slice(0,-3)
+                //        const harvest_compounds: string[] = event.data[event.data.length-3]
+                //        const harvest_sources: string[] = event.data[event.data.length-2]
+                //        const harvest_targets: number[] = event.data[event.data.length-1]
+                //        Promise.all(
+                //            files.map(async (file: EmpowerFile) => {
+                //                const content = await _read_file_text(file)
+                //                const parsed_content = await _harvest_empower_file(content, harvest_compounds, harvest_sources, harvest_targets)
+                //                return parsed_content
+                //            })
+                //        ).then((extractedValues: [string, string, string, string, number[], number[]][][]) => {
+                //            self.postMessage(extractedValues)
+                //        })
+                //    })
+                //}
+                //console.log(this.input_el.files)
+                //this.worker_pool.task_pool(harvest_empower_data, Array.from(this.input_el.files as FileList), [harvest_compounds, harvest_sources, harvest_targets]).then((result: ([string, string, string, string, number[], number[]][][])) =>{
+                //    let results = result.reduce((accumulator, value) => accumulator.concat(value), [])
+                //    console.log("RESULTS");
+                //    console.log(results);
+                //    let results_trans = results[0].map((_, colIndex) => results.map(row => row[colIndex]));
+                //    console.log("TRANSPOSED RESULTS");
+                //    console.log(results_trans);
+                //    this.model.setv({
+                //        progress_percent: -1,
+                //        progress_status: 'Uploading data.  Please wait...'
+                //    })
+                //    this.model.setv({
+                //        transfered_text: results_trans.slice(0,4),
+                //        transfered_data: results_trans.slice(4),
+                //    })
+                //    this.model.setv({
+                //        progress_state: 2,
+                //        progress_percent: 0,
+                //        progress_status: 'Transfer complete!'
+                //    })
+                //})
+
+                this.current_progress = 0
+                Promise.all(Array.from(this.input_el.files as FileList).map(async (file) => {
                     async function _read_file_text(file: File): Promise<string> {
                         return new Promise<string>((resolve, reject) => {
                             const reader = new FileReader()
@@ -582,24 +752,15 @@ export class FileProgressInputView extends InputWidgetView {
                             progress_resolve(results)
                         });
                     }
+                    const content = await _read_file_text(file)
+                    const parsed_content = await _harvest_empower_file(content, harvest_compounds, harvest_sources, harvest_targets)
                     
-                    self.addEventListener('message', async (event) => {
-                        const files: EmpowerFile[] = event.data.slice(0,-3)
-                        const harvest_compounds: string[] = event.data[event.data.length-3]
-                        const harvest_sources: string[] = event.data[event.data.length-2]
-                        const harvest_targets: number[] = event.data[event.data.length-1]
-                        Promise.all(
-                            files.map(async (file: EmpowerFile) => {
-                                const content = await _read_file_text(file)
-                                const parsed_content = await _harvest_empower_file(content, harvest_compounds, harvest_sources, harvest_targets)
-                                return parsed_content
-                            })
-                        ).then((extractedValues: [string, string, string, string, number[], number[]][][]) => {
-                            self.postMessage(extractedValues)
-                        })
+                    this.current_progress += 1 / this.num_files
+                    this.model.setv({
+                        progress_percent: Math.round(100 * this.current_progress)
                     })
-                }
-                this.worker_pool.task_pool(harvest_empower_data, Array.from(this.input_el.files as FileList), [harvest_compounds, harvest_sources, harvest_targets]).then((result: ([string, string, string, string, number[], number[]][][])) =>{
+                    return parsed_content
+                })).then((result: ([string, string, string, string, number[], number[]][][])) =>{
                     let results = result.reduce((accumulator, value) => accumulator.concat(value), [])
                     let results_trans = results[0].map((_, colIndex) => results.map(row => row[colIndex]));
                     this.model.setv({
