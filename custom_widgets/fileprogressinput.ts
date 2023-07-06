@@ -278,7 +278,7 @@ export class FileProgressInputView extends InputWidgetView {
                             }
                             let vial_bits = header_content[vial_ind].slice(2).split(',')
                             vial_bits[1] = vial_bits[1].padStart(2, '0')
-                            file.well = vial_bits[0] + vial_bits[1]
+                            file.well = vial_bits[0].toUpperCase() + vial_bits[1]
             
                             const sample_ind = header_labels.indexOf("\"SampleName\"")
                             if (sample_ind == -1) {
@@ -502,7 +502,7 @@ export class FileProgressInputView extends InputWidgetView {
                 //            const vial_ind = header_labels.indexOf("\"Vial\"")
                 //            let vial_bits = header_content[vial_ind].slice(3, -1).split(',')
                 //            vial_bits[1] = vial_bits[1].padStart(2, '0')
-                //            const well = vial_bits[0] + vial_bits[1]
+                //            const well = vial_bits[0].toUpperCase() + vial_bits[1]
                 //            
                 //            let sample_name = ""
                 //            const sample_ind = header_labels.indexOf("\"SampleName\"")
@@ -670,7 +670,7 @@ export class FileProgressInputView extends InputWidgetView {
                             const vial_ind = header_labels.indexOf("\"Vial\"")
                             let vial_bits = header_content[vial_ind].slice(3, -1).split(',')
                             vial_bits[1] = vial_bits[1].padStart(2, '0')
-                            const well = vial_bits[0] + vial_bits[1]
+                            const well = vial_bits[0].toUpperCase() + vial_bits[1]
                             
                             let sample_name = ""
                             const sample_ind = header_labels.indexOf("\"SampleName\"")
