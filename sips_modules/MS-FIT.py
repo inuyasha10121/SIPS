@@ -316,7 +316,7 @@ class module_class:
                 self.update_overlay_plot_stream = Stream.define('flag', flag=False)()
                 self.selection_stream = BoundsX(boundsx=(0,0))
                 self.selection_stream.param.watch(self.range_selection_input, ['boundsx'], onlychanged=False)
-                self.overlay_plot = hv.DynamicMap(self.overlay_plot_dmap, streams=[self.selection_stream, self.update_overlay_plot_stream]).opts(framewise=True, tools=['hover', 'xbox_select'])
+                self.overlay_plot = hv.DynamicMap(self.overlay_plot_dmap, streams=[self.selection_stream, self.update_overlay_plot_stream]).opts(framewise=True, tools=['hover', 'xbox_select', 'box_zoom'])
                 self.integration_statistics_plot = hv.DynamicMap(self.integration_statistics_dmap, streams=[Stream.define('Next')()]).opts(framewise=True)
                 self.integration_region_plot = hv.DynamicMap(self.selection_plot_dmap, streams=[self.selection_stream]).opts(framewise=True)
                 self.plot = (self.integration_region_plot * self.overlay_plot * self.integration_statistics_plot).opts(show_legend=False, framewise=True).opts(
@@ -459,9 +459,14 @@ class module_class:
                     cwtmatr = self.library[plate][well][compound].cwt_generation(second_deriv)
                     self.status_text.value = "Finding minima/maxima in selection range..."
                     minima_inds, maxima_inds = self.library[plate][well][compound].cwt_analysis(cwtmatr)
-                    best_index = self.library[plate][well][compound].score_stationary_points(cwtmatr, maxima_inds, self.library[plate][well][compound].rt, self.library[plate][well][compound].rt_tolerance)
-                    print(f"BEST: {best_index}")
-                    self.library[plate][well][compound].get_initial_peak_bounds(cwtmatr, minima_inds)
+                    #Restrict minima/maxima to defined integration region
+                    mask = (maxima_inds[:,1] >= self.library[plate][well][compound].peak_bound_inds[0]) & (maxima_inds[:,1] <= self.library[plate][well][compound].peak_bound_inds[1])
+                    maxima_inds = maxima_inds[mask,:]
+                    span = self.library[plate][well][compound].peak_bound_inds[1] - self.library[plate][well][compound].peak_bound_inds[0]
+                    mask = (minima_inds[:,1] >= (self.library[plate][well][compound].peak_bound_inds[0] - span)) & (minima_inds[:,1] <= (self.library[plate][well][compound].peak_bound_inds[1] + span))
+                    minima_inds = minima_inds[mask,:]
+                    #best_index = self.library[plate][well][compound].score_stationary_points(cwtmatr, maxima_inds, self.library[plate][well][compound].rt, self.library[plate][well][compound].rt_tolerance)
+                    #self.library[plate][well][compound].get_initial_peak_bounds(cwtmatr, minima_inds, best_index)
                     #Figure out bounds with appropriate padding
                     time_per_pixel = (self.library[plate][well][compound].time[-1] - self.library[plate][well][compound].time[0]) / cwtmatr.shape[1]
                     bounds = [
@@ -470,16 +475,6 @@ class module_class:
                         self.library[plate][well][compound].time[-1] + (time_per_pixel/2),
                         pp_cwt_max_scale_input.value + 0.5
                     ]
-                    #Score our minima and maxima to our specified points
-                    maxima_scores = np.zeros(maxima_inds.shape[0])
-                    maxima_scores[self.library[plate][well][compound].score_stationary_points(cwtmatr, maxima_inds, pp_rt_input.value, pp_rt_tolerance.value)] = 1
-                    minima_scores = np.zeros(minima_inds.shape[0])
-                    minima_scores[np.where(minima_inds[:,1] == self.library[plate][well][compound].peak_bound_inds[0])[0][0]] = 1
-                    minima_scores[np.where(minima_inds[:,1] == self.library[plate][well][compound].peak_bound_inds[1])[0][0]] = 1
-                    a = np.where(minima_inds[:,1] == self.library[plate][well][compound].peak_bound_inds[0])[0][0]
-                    b = np.where(minima_inds[:,1] == self.library[plate][well][compound].peak_bound_inds[1])[0][0]
-                    print(f"{self.library[plate][well][compound].time[minima_inds[a,1]]}\t{self.library[plate][well][compound].time[minima_inds[b,1]]}")
-
                     #Map minima and maxima indicies to time values
                     minima_inds = minima_inds.astype(np.float32)
                     minima_inds[:,0] += pp_cwt_min_scale_input.value
@@ -494,8 +489,8 @@ class module_class:
                 self.debug_text.value += traceback.format_exc() + "\n\n"
             return hv.Overlay([
                 hv.Image(cwtmatr[::-1,:], kdims=['x', 'cwt_scale'], bounds=bounds).opts(cmap='viridis'),
-                hv.Scatter({'x': minima_inds[:,1], 'cwt_scale': minima_inds[:,0], 'min_score': minima_scores}, kdims='x', vdims=['cwt_scale', 'min_score']).opts(framewise=True, color='min_score', cmap='kbc'),#, color='#BCFEAB'),
-                hv.Scatter({'x': maxima_inds[:,1], 'cwt_scale': maxima_inds[:,0], 'max_score': maxima_scores}, kdims='x', vdims=['cwt_scale', 'max_score']).opts(framewise=True, color='max_score', cmap='kr')#, color='#0218DB')
+                hv.Scatter({'x': minima_inds[:,1], 'cwt_scale': minima_inds[:,0]}, kdims='x', vdims='cwt_scale').opts(framewise=True, color='c'),
+                hv.Scatter({'x': maxima_inds[:,1], 'cwt_scale': maxima_inds[:,0]}, kdims='x', vdims='cwt_scale').opts(framewise=True, color='r')
             ])
         cwt_analysis_plot = hv.DynamicMap(cwt_analysis_dmap, streams=[Stream.define('Next')()]).opts(framewise=True)
         
