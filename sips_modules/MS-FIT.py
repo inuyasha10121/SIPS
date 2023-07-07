@@ -218,6 +218,7 @@ class module_class:
             def tap_select(self, x, y):
                 plate = self.outer_instance.pp_plate_selector.value
                 well = f"{chr(int(72-np.round(y, 0)))}{str(int(np.round(x, 0)+1)).zfill(2)}"
+                print(well)
                 if well in self.well_list:
                     del self.well_list[self.well_list.index(well)]
                     selection_view.update_overlay_plot()
@@ -465,8 +466,6 @@ class module_class:
                     span = self.library[plate][well][compound].peak_bound_inds[1] - self.library[plate][well][compound].peak_bound_inds[0]
                     mask = (minima_inds[:,1] >= (self.library[plate][well][compound].peak_bound_inds[0] - span)) & (minima_inds[:,1] <= (self.library[plate][well][compound].peak_bound_inds[1] + span))
                     minima_inds = minima_inds[mask,:]
-                    #best_index = self.library[plate][well][compound].score_stationary_points(cwtmatr, maxima_inds, self.library[plate][well][compound].rt, self.library[plate][well][compound].rt_tolerance)
-                    #self.library[plate][well][compound].get_initial_peak_bounds(cwtmatr, minima_inds, best_index)
                     #Figure out bounds with appropriate padding
                     time_per_pixel = (self.library[plate][well][compound].time[-1] - self.library[plate][well][compound].time[0]) / cwtmatr.shape[1]
                     bounds = [
@@ -622,7 +621,7 @@ class module_class:
                     snrs = np.zeros(n_wells)
                     stcurve_areas = np.zeros(n_wells)
                     all_stcurve = True
-                    pp_peak_source_display.value = ", ".join([self.library[plate][well][compound] for well in disp_well_list])
+                    pp_peak_source_display.value = ", ".join([self.library[plate][well][compound].source for well in disp_well_list])
                     for i, well in enumerate(disp_well_list):
                         rts[i] = self.library[plate][well][compound].peak_rt
                         areas[i] = self.library[plate][well][compound].peak_area
