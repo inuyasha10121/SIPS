@@ -75,9 +75,18 @@ export class DataSelectionTableView extends InputWidgetView {
                     var targ = (e.target as HTMLSelectElement);
                     var cell_ind = parseInt(targ.id.substring(2));
                     var val = targ.value;
-                    //Disable target input if source is 2D
-                    (<HTMLInputElement>this.targetCells[cell_ind].children[0]).disabled = !this.model.possible_sources[this.model.possible_sources.indexOf(val)].includes('Scan');
-                    (<HTMLInputElement>this.targetCells[cell_ind].children[0]).value = "";
+                    //Disable compound and target if source is empty
+                    if (val == ""){
+                        (<HTMLInputElement>this.compoundCells[cell_ind].children[0]).disabled = true;
+                        (<HTMLInputElement>this.compoundCells[cell_ind].children[0]).value = "";
+                        (<HTMLInputElement>this.targetCells[cell_ind].children[0]).disabled = true;
+                        (<HTMLInputElement>this.targetCells[cell_ind].children[0]).value = "";
+                    } else {
+                        (<HTMLInputElement>this.compoundCells[cell_ind].children[0]).disabled = false;
+                        //Disable target input if source is 2D
+                        (<HTMLInputElement>this.targetCells[cell_ind].children[0]).disabled = !this.model.possible_sources[this.model.possible_sources.indexOf(val)].includes('Scan');
+                        (<HTMLInputElement>this.targetCells[cell_ind].children[0]).value = "";
+                    }                    
                     //Store changed value
                     this.model.sources[(this.model.curr_page * this.model.cells_per_page) + cell_ind] = targ.value;
                 };
@@ -156,15 +165,26 @@ export class DataSelectionTableView extends InputWidgetView {
     }
     refresh_table(): void {
         for(var i = 0; i < this.model.cells_per_page; i++){
-            (<HTMLInputElement>this.compoundCells[i].children[0]).value = this.model.compounds[(this.model.curr_page * this.model.cells_per_page) + i];
-            (<HTMLSelectElement>this.sourceCells[i].children[0]).value = this.model.sources[(this.model.curr_page * this.model.cells_per_page) + i];
-            
-            if (this.model.possible_sources[this.model.possible_sources.indexOf(this.model.sources[(this.model.curr_page * this.model.cells_per_page) + i])].includes('Scan')) {
-                (<HTMLInputElement>this.targetCells[i].children[0]).disabled = false;
-                (<HTMLInputElement>this.targetCells[i].children[0]).value = this.model.targets[(this.model.curr_page * this.model.cells_per_page) + i];
+            var compound_cell = (<HTMLInputElement>this.compoundCells[i].children[0]);
+            var source_cell = (<HTMLSelectElement>this.sourceCells[i].children[0]);
+            var target_cell = (<HTMLInputElement>this.targetCells[i].children[0]);
+
+            source_cell.value = this.model.sources[(this.model.curr_page * this.model.cells_per_page) + i];
+            if (source_cell.value == ""){
+                compound_cell.disabled = true;
+                compound_cell.value = "";
+                target_cell.disabled = true;
+                target_cell.value = "";
+            } else if (source_cell.value.includes('Scan')) {
+                compound_cell.disabled = false;
+                compound_cell.value = this.model.compounds[(this.model.curr_page * this.model.cells_per_page) + i];
+                target_cell.disabled = false;
+                target_cell.value = this.model.targets[(this.model.curr_page * this.model.cells_per_page) + i];
             } else {
-                (<HTMLInputElement>this.targetCells[i].children[0]).disabled = true;
-                (<HTMLInputElement>this.targetCells[i].children[0]).value = "";
+                compound_cell.disabled = false;
+                compound_cell.value = this.model.compounds[(this.model.curr_page * this.model.cells_per_page) + i];
+                target_cell.disabled = true;
+                target_cell.value = "";
             }
         }
     }
@@ -179,7 +199,7 @@ export class DataSelectionTableView extends InputWidgetView {
                 let source = this.model.sources[i];
                 let target = this.model.targets[i];
                 this.model.compounds[i] = "";
-                this.model.sources[i] = this.model.possible_sources[0];
+                this.model.sources[i] = "";
                 this.model.targets[i] = "";
                 this.model.compounds[c] = compound;
                 this.model.sources[c] = source;
@@ -187,7 +207,7 @@ export class DataSelectionTableView extends InputWidgetView {
                 c += 1;
             } else {
                 this.model.compounds[i] = "";
-                this.model.sources[i] = this.model.possible_sources[0];
+                this.model.sources[i] = "";
                 this.model.targets[i] = "";
             }
         }
@@ -198,6 +218,11 @@ export class DataSelectionTableView extends InputWidgetView {
         for (var i = 0; i < this.sourceCells.length; i++) {
             //Clear options
             this.sourceCells[i].children[0].innerHTML = "";
+            //Add blank option
+            var opt = document.createElement('option');
+            opt.value = "";
+            opt.innerHTML = "";
+            this.sourceCells[i].children[0].appendChild(opt);
             //Add new options on
             this.model.possible_sources.forEach((option) => {
                 var opt = document.createElement('option');
