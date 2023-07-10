@@ -16,7 +16,11 @@ interface EmpowerFile extends File {
     well: string
     wavelengths: number[]
     content3d: boolean
+}
 
+interface AB1File extends File{
+    sample_name: string
+    results: [number[], number[], number[], number[], number[], number[], number[], number[]]
 }
 
 class WorkerPool {
@@ -229,9 +233,97 @@ export class FileProgressInputView extends InputWidgetView {
                 }
             }
             reader.onerror = () => {
-                reject(new Error(`Error reading '${file.name}'`));
+                reject(new Error(`Error reading '${file.name}'`))
             }
             reader.readAsText(file);
+        })
+    }
+
+    _read_parse_ABI(file: AB1File): Promise<AB1File> {
+        return new Promise<AB1File>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () => {
+                const {result} = reader
+                if (result != null) {
+                    file.results = [[], [], [], [], [], [], [], []]
+                    //Extract relevant entries from AB1 file
+                    //https://projects.nfstc.org/workshops/resources/articles/ABIF_File_Format.pdf
+                    var buffer = reader.result as ArrayBuffer
+                    var view = new DataView(buffer);
+                    var data_offset = view.getUint32(26);
+                    var peak_inds: number[] = [];
+                    for(var i = data_offset; i < view.byteLength; i += 28){
+                        var name_tag = String.fromCharCode(view.getUint8(i)) + String.fromCharCode(view.getUint8(i+1)) + String.fromCharCode(view.getUint8(i+2)) + String.fromCharCode(view.getUint8(i+3)) + view.getUint32(i+4);
+                        if(name_tag == "SMPL1"){
+                            var count = view.getUint32(i+12);
+                            var offset = view.getUint32(i+20);
+                            var smpl_arr = new Uint8Array(buffer, offset+1, count-1);
+                            file.sample_name = new TextDecoder().decode(smpl_arr);
+                        } else if (name_tag == "PLOC1"){
+                            var count = view.getUint32(i+12);
+                            var offset = view.getUint32(i+20);
+                            var peak_inds = Array<number>(count);
+                            for(var j = 0; j < count; j++){
+                                peak_inds[j] = view.getUint16(offset + (2*j));
+                            }
+                        } else if (name_tag == "DATA9"){
+                            var count = view.getUint32(i+12);
+                            var offset = view.getUint32(i+20);
+                            file.results[0] = Array(count);
+                            for(var j = 0; j < count; j++){
+                                file.results[0][j] = view.getUint16(offset + (2*j));
+                            }
+                        } else if (name_tag == "DATA10"){
+                            var count = view.getUint32(i+12);
+                            var offset = view.getUint32(i+20);
+                            file.results[1] = Array(count);
+                            for(var j = 0; j < count; j++){
+                                file.results[1][j] = view.getUint16(offset + (2*j));
+                            }
+                        } else if (name_tag == "DATA11"){
+                            var count = view.getUint32(i+12);
+                            var offset = view.getUint32(i+20);
+                            file.results[2] = Array(count);
+                            for(var j = 0; j < count; j++){
+                                file.results[2][j] = view.getUint16(offset + (2*j));
+                            }
+                        } else if (name_tag == "DATA12"){
+                            var count = view.getUint32(i+12);
+                            var offset = view.getUint32(i+20);
+                            file.results[3] = Array(count);
+                            for(var j = 0; j < count; j++){
+                                file.results[3][j] = view.getUint16(offset + (2*j));
+                            }
+                        }
+                    }
+                    //Reduce down data to only key points of interest
+                    var midpoints = [...Array(peak_inds.length - 1).keys()].map(i => Math.floor((peak_inds[i+1] - peak_inds[i]) / 2) + peak_inds[i]);
+                    file.results[4] = midpoints.map(i => file.results[0][i]); //DATA9
+                    file.results[5] = midpoints.map(i => file.results[1][i]); //DATA10
+                    file.results[6] = midpoints.map(i => file.results[2][i]); //DATA11
+                    file.results[7] = midpoints.map(i => file.results[3][i]); //DATA12
+                    file.results[0] = peak_inds.map(i => file.results[0][i]); //DATA9
+                    file.results[1] = peak_inds.map(i => file.results[1][i]); //DATA10
+                    file.results[2] = peak_inds.map(i => file.results[2][i]); //DATA11
+                    file.results[3] = peak_inds.map(i => file.results[3][i]); //DATA12
+                    //Pad to make all lines equal in length
+                    file.results[4].push(0)
+                    file.results[5].push(0)
+                    file.results[6].push(0)
+                    file.results[7].push(0)
+                    this.current_progress += 1 / this.num_files
+                    this.model.setv({
+                        progress_percent: Math.round(100 * this.current_progress)
+                    })
+                    resolve(file)
+                } else {
+                    reject(reader.error ?? new Error(`unable to read '${file.name}'`))
+                }
+            }
+            reader.onerror = () => {
+                reject(new Error(`Error reading '${file.name}'`))
+            }
+            reader.readAsArrayBuffer(file);
         })
     }
 
@@ -397,16 +489,61 @@ export class FileProgressInputView extends InputWidgetView {
                         })
                     })
                 })
-                break
-            case 'ab1':
-                //This is fluoresences data from a sequencing read, to be used in AReS
-                break
+                break;
             case 'fasta':
+                this.model.setv({
+                    progress_state: 0,
+                    progress_percent: 0,
+                    progress_status: 'Preprocessing data...',
+                })
                 //This is alignment data from a sequencing run, to be used in AReS
-                break
+                Promise.all(Array.from(files).map(async (file) => {
+                    return await this._read_file_text(file)
+                })).then((read_files) => {
+                    let content_lines = read_files[0][1].split(/[\x0D\x0a]+/g)
+                    let counter = -1;
+                    let entries: string[][] = [];
+                    for(let i = 0; i < content_lines.length; i++){
+                        if (content_lines[i].startsWith('>')){
+                            entries.push([content_lines[i].slice(1), ""])
+                            counter += 1;
+                        } else {
+                            entries[counter][1] += content_lines[i]
+                        }
+                    }
+
+                    this.model.setv({
+                        file_type: 'FASTA',
+                        progress_state: 1,
+                        progress_percent: -1,
+                        progress_status: 'Parameters extracted!  Please input harvesting info.',
+                        transfered_text: entries
+                    })
+                })
+                break;
+            case 'ab1':
+                this.model.setv({
+                    progress_state: 0,
+                    progress_percent: 0,
+                    progress_status: 'Preprocessing data...',
+                })
+                //This is fluoresences data from a sequencing read, to be used in AReS
+                Promise.all(Array.from(files).map(async (file) => {
+                    return await this._read_parse_ABI(file as AB1File)
+                })).then((results) => {
+                    this.model.setv({
+                        file_type: 'AB1',
+                        progress_state: 1,
+                        progress_percent: -1,
+                        progress_status: 'Parameters extracted!  Please input harvesting info.',
+                        transfered_text: [results.map(function(value) { return value.sample_name })]
+                    })
+                })
+                
+                break;
             case 'bin':
                 //This is an archival file from the software 
-                break
+                break;
             default:
                 this.model.setv({
                     progress_state: 0,
@@ -418,370 +555,405 @@ export class FileProgressInputView extends InputWidgetView {
     }
 
     harvest_data(): void {
-        //Extract out everything the user specified from the data selection table
-        if (this.model.document != null){
-            let dst_model = this.model.document.get_model_by_name('bk_fi_target_table')
-            if (dst_model != null){
-                let dst_compounds = (dst_model.attributes.compounds as string[])
-                let dst_sources = (dst_model.attributes.sources as string[])
-                let dst_targets = (dst_model.attributes.targets as string[])
-                let harvest_compounds = [] as string[]
-                let harvest_sources = [] as string[]
-                let harvest_targets = [] as number[]
-                for(let i = 0; i < ((dst_model.attributes.max_pages as number) * (dst_model.attributes.cells_per_page as number)); i++){
-                    let compound = dst_compounds[i]
-                    if (compound != ""){
-                        let source = dst_sources[i]
-                        if (source.includes("Scan")){
-                            //3D data
-                            let target = dst_targets[i]
-                            if (target != ""){
-                                harvest_compounds.push(compound)
-                                harvest_sources.push(source)
-                                harvest_targets.push(parseFloat(target))
-                            }
-                        } else {
-                            //2D data
-                            harvest_compounds.push(compound)
-                            harvest_sources.push(source)
-                            harvest_targets.push(0)
-                        }
-                    }
-                }
-                //Now, we can read the files
-                this.model.setv({
-                    progress_percent: 0,
-                    progress_status: 'Harvesting requested data...'
-                })
-
-                //function harvest_empower_data(){
-                //    async function _read_file_text(file: File): Promise<string> {
-                //        return new Promise<string>((resolve, reject) => {
-                //            const reader = new FileReader()
-                //            reader.onload = () => {
-                //                const {result} = reader
-                //                if (result != null) {
-                //                    resolve(result as string)
-                //                } else {
-                //                    reject(reader.error ?? new Error(`unable to read '${file.name}'`))
-                //                }
-                //            }
-                //            reader.onerror = () => {
-                //                reject(new Error(`Error reading '${file.name}'`));
-                //            }
-                //            reader.readAsText(file);
-                //        })
-                //    }
-                //    
-                //    async function _harvest_empower_file(content: string, harvest_compounds: string[], harvest_sources: string[], harvest_targets: number[]): Promise<[string, string, string, string, number[], number[]][]> {
-                //        return new Promise((resolve) => {
-                //            //const self = this
-                //            function progress_resolve(parsed_data: [string, string, string, string, number[], number[]][]): void{
-                //                console.log("PARSED DATA")
-                //                parsed_data.forEach(function (row) {
-                //                    console.log(`${row[0]}\t${row[1]}\t${row[2]}\t${row[3]}\t${row[4].length}\t${row[5].length}`)
-                //                })
-                //                resolve(parsed_data)
-                //            }
-                //
-                //            function parse_data(array: string[]): number[][] {
-                //                let values = array.map(line => {
-                //                    return line.split(/\s+/g).map(num => {
-                //                      return parseFloat(num)
-                //                  })
-                //                })
-                //                return values.map((_, colIndex) => values.map(row => row[colIndex]));
-                //            }
-                //            
-                //            //Re-extract our relevant parameters from the header
-                //            //First, check to see if we have the necessary information in the header
-                //            let content_lines = content.split(/[\x0D\x0a]+/g)
-                //            const header_labels = (content_lines[0].match(/(?:"[^"]*"|\S+)/g) as RegExpMatchArray)
-                //            const header_content = (content_lines[1].match(/(?:"[^"]*"|\S+)/g) as RegExpMatchArray)
-                //            
-                //            const vial_ind = header_labels.indexOf("\"Vial\"")
-                //            let vial_bits = header_content[vial_ind].slice(3, -1).split(',')
-                //            vial_bits[1] = vial_bits[1].padStart(2, '0')
-                //            const well = vial_bits[0].toUpperCase() + vial_bits[1]
-                //            
-                //            let sample_name = ""
-                //            const sample_ind = header_labels.indexOf("\"SampleName\"")
-                //            if (sample_ind != -1) {
-                //                sample_name = header_content[sample_ind].slice(1, -1)
-                //            }
-                //            
-                //            const channel_ind = header_labels.indexOf("\"Channel Description\"")
-                //            const channel_desc = header_content[channel_ind]
-//
-                //            let tag = ""
-                //            let wavelengths: number[] = []
-                //            if (channel_desc.includes('QDa')){
-                //                if (channel_desc.includes('Scan')) {
-                //                    wavelengths = content_lines[2].split(/\s+/g).slice(1).map(parseFloat);
-                //                    if (channel_desc.includes('Positive')){
-                //                        tag = '(+)MS Scan'
-                //                    } else if (channel_desc.includes('Negative')){
-                //                        tag = '(-)MS Scan'
-                //                    }
-                //                } else if (channel_desc.includes('SIR')){
-                //                    const desc_split = channel_desc.split(/[ ,]+/g)
-                //                    const sir_mz = desc_split[desc_split.indexOf('Da')-1]
-                //                    if (channel_desc.includes('Positive')){
-                //                        tag = `(+)SIR ${sir_mz} m/z`
-                //                    } else if (channel_desc.includes('Negative')){
-                //                        tag = `(-)SIR ${sir_mz} m/z`
-                //                    }
-                //                }
-                //            } else if (channel_desc.includes('PDA')) {
-                //                if (channel_desc.includes('Spectrum')) {
-                //                    wavelengths = content_lines[2].split(/\s+/g).slice(1).map(parseFloat);
-                //                    tag = `PDA Scan`
-                //                } else if (channel_desc.includes('@')) {
-                //                    const desc_split = channel_desc.split(/[ ,]+/g)
-                //                    const wl_ind = desc_split.findIndex(el => el.includes('@'))
-                //                    const wl = desc_split[wl_ind].split('@')[0]
-                //                    tag = wl
-                //                }
-                //            }
-                //            
-//
-                //            //Go through all our harvested sources
-                //            let results: [string, string, string, string, number[], number[]][] = []
-                //            for (let i = 0; i < harvest_sources.length; i++){
-                //                //Check if the file source matches
-                //                if (harvest_sources[i] == tag){
-                //                    let compound = harvest_compounds[i]
-                //                    //Check for 3D or 2D data
-                //                    if (wavelengths.length > 0){
-                //                        let parsed_content = parse_data(content_lines.slice(4, -1))
-                //                        let target = harvest_targets[i]
-                //                        //Make our tag more descriptive
-                //                        let new_tag = ""
-                //                        if (tag.includes('MS')){
-                //                            new_tag = `${tag.substring(0, 3)}XIC ${target} m/z`
-                //                        } else {
-                //                            new_tag = `XAC ${target} nm`
-                //                        }
-                //                        //Find the closest wavelength or m/z to the target
-                //                        function find_closest(arr: number[], target: number): number{
-                //                            let diff = Math.abs(arr[0] - target)
-                //                            let best = 0
-                //                            for (let i = 1; i < arr.length; i++){
-                //                                if (Math.abs(arr[i] - target) < diff){
-                //                                    best = i
-                //                                }
-                //                            }
-                //                            return best
-                //                        }
-                //                        let closest_wl_ind = find_closest(wavelengths, target)
-                //                        results.push([sample_name, well, compound, new_tag, parsed_content[0], parsed_content[closest_wl_ind]])
-                //                    } else {
-                //                        let parsed_content = parse_data(content_lines.slice(2, -1))
-                //                        //Easy push
-                //                        results.push([sample_name, well, compound, tag, parsed_content[0], parsed_content[1]])
-                //                    }
-                //                }
-                //            }
-                //            progress_resolve(results)
-                //        });
-                //    }
-                //    
-                //    self.addEventListener('message', async (event) => {
-                //        const files: EmpowerFile[] = event.data.slice(0,-3)
-                //        const harvest_compounds: string[] = event.data[event.data.length-3]
-                //        const harvest_sources: string[] = event.data[event.data.length-2]
-                //        const harvest_targets: number[] = event.data[event.data.length-1]
-                //        Promise.all(
-                //            files.map(async (file: EmpowerFile) => {
-                //                const content = await _read_file_text(file)
-                //                const parsed_content = await _harvest_empower_file(content, harvest_compounds, harvest_sources, harvest_targets)
-                //                return parsed_content
-                //            })
-                //        ).then((extractedValues: [string, string, string, string, number[], number[]][][]) => {
-                //            self.postMessage(extractedValues)
-                //        })
-                //    })
-                //}
-                //console.log(this.input_el.files)
-                //this.worker_pool.task_pool(harvest_empower_data, Array.from(this.input_el.files as FileList), [harvest_compounds, harvest_sources, harvest_targets]).then((result: ([string, string, string, string, number[], number[]][][])) =>{
-                //    let results = result.reduce((accumulator, value) => accumulator.concat(value), [])
-                //    console.log("RESULTS");
-                //    console.log(results);
-                //    let results_trans = results[0].map((_, colIndex) => results.map(row => row[colIndex]));
-                //    console.log("TRANSPOSED RESULTS");
-                //    console.log(results_trans);
-                //    this.model.setv({
-                //        progress_percent: -1,
-                //        progress_status: 'Uploading data.  Please wait...'
-                //    })
-                //    this.model.setv({
-                //        transfered_text: results_trans.slice(0,4),
-                //        transfered_data: results_trans.slice(4),
-                //    })
-                //    this.model.setv({
-                //        progress_state: 2,
-                //        progress_percent: 0,
-                //        progress_status: 'Transfer complete!'
-                //    })
-                //})
-
-                this.current_progress = 0
-                Promise.all(Array.from(this.input_el.files as FileList).map(async (file) => {
-                    async function _read_file_text(file: File): Promise<string> {
-                        return new Promise<string>((resolve, reject) => {
-                            const reader = new FileReader()
-                            reader.onload = () => {
-                                const {result} = reader
-                                if (result != null) {
-                                    resolve(result as string)
+        const ext = (<FileList>this.input_el.files)[0].name.split('.').pop()
+        switch(ext){
+            case 'arw':
+                //Extract out everything the user specified from the data selection table
+                if (this.model.document != null){
+                    let dst_model = this.model.document.get_model_by_name('bk_fi_target_table')
+                    if (dst_model != null){
+                        let dst_compounds = (dst_model.attributes.compounds as string[])
+                        let dst_sources = (dst_model.attributes.sources as string[])
+                        let dst_targets = (dst_model.attributes.targets as string[])
+                        let harvest_compounds = [] as string[]
+                        let harvest_sources = [] as string[]
+                        let harvest_targets = [] as number[]
+                        for(let i = 0; i < ((dst_model.attributes.max_pages as number) * (dst_model.attributes.cells_per_page as number)); i++){
+                            let compound = dst_compounds[i]
+                            if (compound != ""){
+                                let source = dst_sources[i]
+                                if (source.includes("Scan")){
+                                    //3D data
+                                    let target = dst_targets[i]
+                                    if (target != ""){
+                                        harvest_compounds.push(compound)
+                                        harvest_sources.push(source)
+                                        harvest_targets.push(parseFloat(target))
+                                    }
                                 } else {
-                                    reject(reader.error ?? new Error(`unable to read '${file.name}'`))
+                                    //2D data
+                                    harvest_compounds.push(compound)
+                                    harvest_sources.push(source)
+                                    harvest_targets.push(0)
                                 }
                             }
-                            reader.onerror = () => {
-                                reject(new Error(`Error reading '${file.name}'`));
-                            }
-                            reader.readAsText(file);
+                        }
+                        //Now, we can read the files
+                        this.model.setv({
+                            progress_percent: 0,
+                            progress_status: 'Harvesting requested data...'
                         })
-                    }
-                    
-                    async function _harvest_empower_file(content: string, harvest_compounds: string[], harvest_sources: string[], harvest_targets: number[]): Promise<[string, string, string, string, number[], number[]][]> {
-                        return new Promise((resolve) => {
-                            //const self = this
-                            function progress_resolve(parsed_data: [string, string, string, string, number[], number[]][]): void{
-                                resolve(parsed_data)
-                            }
-                
-                            function parse_data(array: string[]): number[][] {
-                                let values = array.map(line => {
-                                    return line.split(/\s+/g).map(num => {
-                                      return parseFloat(num)
-                                  })
-                                })
-                                return values.map((_, colIndex) => values.map(row => row[colIndex]));
-                            }
-                            
-                            //Re-extract our relevant parameters from the header
-                            //First, check to see if we have the necessary information in the header
-                            let content_lines = content.split(/[\x0D\x0a]+/g)
-                            const header_labels = (content_lines[0].match(/(?:"[^"]*"|\S+)/g) as RegExpMatchArray)
-                            const header_content = (content_lines[1].match(/(?:"[^"]*"|\S+)/g) as RegExpMatchArray)
-                            
-                            const vial_ind = header_labels.indexOf("\"Vial\"")
-                            let vial_bits = header_content[vial_ind].slice(3, -1).split(',')
-                            vial_bits[1] = vial_bits[1].padStart(2, '0')
-                            const well = vial_bits[0].toUpperCase() + vial_bits[1]
-                            
-                            let sample_name = ""
-                            const sample_ind = header_labels.indexOf("\"SampleName\"")
-                            if (sample_ind != -1) {
-                                sample_name = header_content[sample_ind].slice(1, -1)
-                            }
-                            
-                            const channel_ind = header_labels.indexOf("\"Channel Description\"")
-                            const channel_desc = header_content[channel_ind]
 
-                            let tag = ""
-                            let wavelengths: number[] = []
-                            if (channel_desc.includes('QDa')){
-                                if (channel_desc.includes('Scan')) {
-                                    wavelengths = content_lines[2].split(/\s+/g).slice(1).map(parseFloat);
-                                    if (channel_desc.includes('Positive')){
-                                        tag = '(+)MS Scan'
-                                    } else if (channel_desc.includes('Negative')){
-                                        tag = '(-)MS Scan'
-                                    }
-                                } else if (channel_desc.includes('SIR')){
-                                    const desc_split = channel_desc.split(/[ ,]+/g)
-                                    const sir_mz = desc_split[desc_split.indexOf('Da')-1]
-                                    if (channel_desc.includes('Positive')){
-                                        tag = `(+)SIR ${sir_mz} m/z`
-                                    } else if (channel_desc.includes('Negative')){
-                                        tag = `(-)SIR ${sir_mz} m/z`
-                                    }
-                                }
-                            } else if (channel_desc.includes('PDA')) {
-                                if (channel_desc.includes('Spectrum')) {
-                                    wavelengths = content_lines[2].split(/\s+/g).slice(1).map(parseFloat);
-                                    tag = `PDA Scan`
-                                } else if (channel_desc.includes('@')) {
-                                    const desc_split = channel_desc.split(/[ ,]+/g)
-                                    const wl_ind = desc_split.findIndex(el => el.includes('@'))
-                                    const wl = desc_split[wl_ind].split('@')[0]
-                                    tag = wl
-                                }
-                            }
-                            
-                            //Go through all our harvested sources
-                            let results: [string, string, string, string, number[], number[]][] = []
-                            for (let i = 0; i < harvest_sources.length; i++){
-                                //Check if the file source matches
-                                if (harvest_sources[i] == tag){
-                                    let compound = harvest_compounds[i]
-                                    //Check for 3D or 2D data
-                                    if (wavelengths.length > 0){
-                                        let parsed_content = parse_data(content_lines.slice(4, -1))
-                                        let target = harvest_targets[i]
-                                        //Make our tag more descriptive
-                                        let new_tag = ""
-                                        if (tag.includes('MS')){
-                                            new_tag = `${tag.substring(0, 3)}XIC ${target} m/z`
+                        //function harvest_empower_data(){
+                        //    async function _read_file_text(file: File): Promise<string> {
+                        //        return new Promise<string>((resolve, reject) => {
+                        //            const reader = new FileReader()
+                        //            reader.onload = () => {
+                        //                const {result} = reader
+                        //                if (result != null) {
+                        //                    resolve(result as string)
+                        //                } else {
+                        //                    reject(reader.error ?? new Error(`unable to read '${file.name}'`))
+                        //                }
+                        //            }
+                        //            reader.onerror = () => {
+                        //                reject(new Error(`Error reading '${file.name}'`));
+                        //            }
+                        //            reader.readAsText(file);
+                        //        })
+                        //    }
+                        //    
+                        //    async function _harvest_empower_file(content: string, harvest_compounds: string[], harvest_sources: string[], harvest_targets: number[]): Promise<[string, string, string, string, number[], number[]][]> {
+                        //        return new Promise((resolve) => {
+                        //            //const self = this
+                        //            function progress_resolve(parsed_data: [string, string, string, string, number[], number[]][]): void{
+                        //                console.log("PARSED DATA")
+                        //                parsed_data.forEach(function (row) {
+                        //                    console.log(`${row[0]}\t${row[1]}\t${row[2]}\t${row[3]}\t${row[4].length}\t${row[5].length}`)
+                        //                })
+                        //                resolve(parsed_data)
+                        //            }
+                        //
+                        //            function parse_data(array: string[]): number[][] {
+                        //                let values = array.map(line => {
+                        //                    return line.split(/\s+/g).map(num => {
+                        //                      return parseFloat(num)
+                        //                  })
+                        //                })
+                        //                return values.map((_, colIndex) => values.map(row => row[colIndex]));
+                        //            }
+                        //            
+                        //            //Re-extract our relevant parameters from the header
+                        //            //First, check to see if we have the necessary information in the header
+                        //            let content_lines = content.split(/[\x0D\x0a]+/g)
+                        //            const header_labels = (content_lines[0].match(/(?:"[^"]*"|\S+)/g) as RegExpMatchArray)
+                        //            const header_content = (content_lines[1].match(/(?:"[^"]*"|\S+)/g) as RegExpMatchArray)
+                        //            
+                        //            const vial_ind = header_labels.indexOf("\"Vial\"")
+                        //            let vial_bits = header_content[vial_ind].slice(3, -1).split(',')
+                        //            vial_bits[1] = vial_bits[1].padStart(2, '0')
+                        //            const well = vial_bits[0].toUpperCase() + vial_bits[1]
+                        //            
+                        //            let sample_name = ""
+                        //            const sample_ind = header_labels.indexOf("\"SampleName\"")
+                        //            if (sample_ind != -1) {
+                        //                sample_name = header_content[sample_ind].slice(1, -1)
+                        //            }
+                        //            
+                        //            const channel_ind = header_labels.indexOf("\"Channel Description\"")
+                        //            const channel_desc = header_content[channel_ind]
+                        //
+                        //            let tag = ""
+                        //            let wavelengths: number[] = []
+                        //            if (channel_desc.includes('QDa')){
+                        //                if (channel_desc.includes('Scan')) {
+                        //                    wavelengths = content_lines[2].split(/\s+/g).slice(1).map(parseFloat);
+                        //                    if (channel_desc.includes('Positive')){
+                        //                        tag = '(+)MS Scan'
+                        //                    } else if (channel_desc.includes('Negative')){
+                        //                        tag = '(-)MS Scan'
+                        //                    }
+                        //                } else if (channel_desc.includes('SIR')){
+                        //                    const desc_split = channel_desc.split(/[ ,]+/g)
+                        //                    const sir_mz = desc_split[desc_split.indexOf('Da')-1]
+                        //                    if (channel_desc.includes('Positive')){
+                        //                        tag = `(+)SIR ${sir_mz} m/z`
+                        //                    } else if (channel_desc.includes('Negative')){
+                        //                        tag = `(-)SIR ${sir_mz} m/z`
+                        //                    }
+                        //                }
+                        //            } else if (channel_desc.includes('PDA')) {
+                        //                if (channel_desc.includes('Spectrum')) {
+                        //                    wavelengths = content_lines[2].split(/\s+/g).slice(1).map(parseFloat);
+                        //                    tag = `PDA Scan`
+                        //                } else if (channel_desc.includes('@')) {
+                        //                    const desc_split = channel_desc.split(/[ ,]+/g)
+                        //                    const wl_ind = desc_split.findIndex(el => el.includes('@'))
+                        //                    const wl = desc_split[wl_ind].split('@')[0]
+                        //                    tag = wl
+                        //                }
+                        //            }
+                        //            
+                        //
+                        //            //Go through all our harvested sources
+                        //            let results: [string, string, string, string, number[], number[]][] = []
+                        //            for (let i = 0; i < harvest_sources.length; i++){
+                        //                //Check if the file source matches
+                        //                if (harvest_sources[i] == tag){
+                        //                    let compound = harvest_compounds[i]
+                        //                    //Check for 3D or 2D data
+                        //                    if (wavelengths.length > 0){
+                        //                        let parsed_content = parse_data(content_lines.slice(4, -1))
+                        //                        let target = harvest_targets[i]
+                        //                        //Make our tag more descriptive
+                        //                        let new_tag = ""
+                        //                        if (tag.includes('MS')){
+                        //                            new_tag = `${tag.substring(0, 3)}XIC ${target} m/z`
+                        //                        } else {
+                        //                            new_tag = `XAC ${target} nm`
+                        //                        }
+                        //                        //Find the closest wavelength or m/z to the target
+                        //                        function find_closest(arr: number[], target: number): number{
+                        //                            let diff = Math.abs(arr[0] - target)
+                        //                            let best = 0
+                        //                            for (let i = 1; i < arr.length; i++){
+                        //                                if (Math.abs(arr[i] - target) < diff){
+                        //                                    best = i
+                        //                                }
+                        //                            }
+                        //                            return best
+                        //                        }
+                        //                        let closest_wl_ind = find_closest(wavelengths, target)
+                        //                        results.push([sample_name, well, compound, new_tag, parsed_content[0], parsed_content[closest_wl_ind]])
+                        //                    } else {
+                        //                        let parsed_content = parse_data(content_lines.slice(2, -1))
+                        //                        //Easy push
+                        //                        results.push([sample_name, well, compound, tag, parsed_content[0], parsed_content[1]])
+                        //                    }
+                        //                }
+                        //            }
+                        //            progress_resolve(results)
+                        //        });
+                        //    }
+                        //    
+                        //    self.addEventListener('message', async (event) => {
+                        //        const files: EmpowerFile[] = event.data.slice(0,-3)
+                        //        const harvest_compounds: string[] = event.data[event.data.length-3]
+                        //        const harvest_sources: string[] = event.data[event.data.length-2]
+                        //        const harvest_targets: number[] = event.data[event.data.length-1]
+                        //        Promise.all(
+                        //            files.map(async (file: EmpowerFile) => {
+                        //                const content = await _read_file_text(file)
+                        //                const parsed_content = await _harvest_empower_file(content, harvest_compounds, harvest_sources, harvest_targets)
+                        //                return parsed_content
+                        //            })
+                        //        ).then((extractedValues: [string, string, string, string, number[], number[]][][]) => {
+                        //            self.postMessage(extractedValues)
+                        //        })
+                        //    })
+                        //}
+                        //console.log(this.input_el.files)
+                        //this.worker_pool.task_pool(harvest_empower_data, Array.from(this.input_el.files as FileList), [harvest_compounds, harvest_sources, harvest_targets]).then((result: ([string, string, string, string, number[], number[]][][])) =>{
+                        //    let results = result.reduce((accumulator, value) => accumulator.concat(value), [])
+                        //    console.log("RESULTS");
+                        //    console.log(results);
+                        //    let results_trans = results[0].map((_, colIndex) => results.map(row => row[colIndex]));
+                        //    console.log("TRANSPOSED RESULTS");
+                        //    console.log(results_trans);
+                        //    this.model.setv({
+                        //        progress_percent: -1,
+                        //        progress_status: 'Uploading data.  Please wait...'
+                        //    })
+                        //    this.model.setv({
+                        //        transfered_text: results_trans.slice(0,4),
+                        //        transfered_data: results_trans.slice(4),
+                        //    })
+                        //    this.model.setv({
+                        //        progress_state: 2,
+                        //        progress_percent: 0,
+                        //        progress_status: 'Transfer complete!'
+                        //    })
+                        //})
+
+                        this.current_progress = 0
+                        Promise.all(Array.from(this.input_el.files as FileList).map(async (file) => {
+                            async function _read_file_text(file: File): Promise<string> {
+                                return new Promise<string>((resolve, reject) => {
+                                    const reader = new FileReader()
+                                    reader.onload = () => {
+                                        const {result} = reader
+                                        if (result != null) {
+                                            resolve(result as string)
                                         } else {
-                                            new_tag = `XAC ${target} nm`
+                                            reject(reader.error ?? new Error(`unable to read '${file.name}'`))
                                         }
-                                        //Find the closest wavelength or m/z to the target
-                                        function find_closest(arr: number[], target: number): number{
-                                            let diff = Math.abs(arr[0] - target)
-                                            let best = 0
-                                            for (let i = 1; i < arr.length; i++){
-                                                if (Math.abs(arr[i] - target) < diff){
-                                                    best = i
-                                                }
-                                            }
-                                            return best
-                                        }
-                                        let closest_wl_ind = find_closest(wavelengths, target)
-                                        results.push([sample_name, well, compound, new_tag, parsed_content[0], parsed_content[closest_wl_ind]])
-                                    } else {
-                                        let parsed_content = parse_data(content_lines.slice(2, -1))
-                                        //Easy push
-                                        results.push([sample_name, well, compound, tag, parsed_content[0], parsed_content[1]])
                                     }
-                                }
+                                    reader.onerror = () => {
+                                        reject(new Error(`Error reading '${file.name}'`));
+                                    }
+                                    reader.readAsText(file);
+                                })
                             }
-                            progress_resolve(results)
-                        });
+
+                            async function _harvest_empower_file(content: string, harvest_compounds: string[], harvest_sources: string[], harvest_targets: number[]): Promise<[string, string, string, string, number[], number[]][]> {
+                                return new Promise((resolve) => {
+                                    //const self = this
+                                    function progress_resolve(parsed_data: [string, string, string, string, number[], number[]][]): void{
+                                        resolve(parsed_data)
+                                    }
+
+                                    function parse_data(array: string[]): number[][] {
+                                        let values = array.map(line => {
+                                            return line.split(/\s+/g).map(num => {
+                                              return parseFloat(num)
+                                          })
+                                        })
+                                        return values.map((_, colIndex) => values.map(row => row[colIndex]));
+                                    }
+
+                                    //Re-extract our relevant parameters from the header
+                                    //First, check to see if we have the necessary information in the header
+                                    let content_lines = content.split(/[\x0D\x0a]+/g)
+                                    const header_labels = (content_lines[0].match(/(?:"[^"]*"|\S+)/g) as RegExpMatchArray)
+                                    const header_content = (content_lines[1].match(/(?:"[^"]*"|\S+)/g) as RegExpMatchArray)
+
+                                    const vial_ind = header_labels.indexOf("\"Vial\"")
+                                    let vial_bits = header_content[vial_ind].slice(3, -1).split(',')
+                                    vial_bits[1] = vial_bits[1].padStart(2, '0')
+                                    const well = vial_bits[0].toUpperCase() + vial_bits[1]
+
+                                    let sample_name = ""
+                                    const sample_ind = header_labels.indexOf("\"SampleName\"")
+                                    if (sample_ind != -1) {
+                                        sample_name = header_content[sample_ind].slice(1, -1)
+                                    }
+
+                                    const channel_ind = header_labels.indexOf("\"Channel Description\"")
+                                    const channel_desc = header_content[channel_ind]
+
+                                    let tag = ""
+                                    let wavelengths: number[] = []
+                                    if (channel_desc.includes('QDa')){
+                                        if (channel_desc.includes('Scan')) {
+                                            wavelengths = content_lines[2].split(/\s+/g).slice(1).map(parseFloat);
+                                            if (channel_desc.includes('Positive')){
+                                                tag = '(+)MS Scan'
+                                            } else if (channel_desc.includes('Negative')){
+                                                tag = '(-)MS Scan'
+                                            }
+                                        } else if (channel_desc.includes('SIR')){
+                                            const desc_split = channel_desc.split(/[ ,]+/g)
+                                            const sir_mz = desc_split[desc_split.indexOf('Da')-1]
+                                            if (channel_desc.includes('Positive')){
+                                                tag = `(+)SIR ${sir_mz} m/z`
+                                            } else if (channel_desc.includes('Negative')){
+                                                tag = `(-)SIR ${sir_mz} m/z`
+                                            }
+                                        }
+                                    } else if (channel_desc.includes('PDA')) {
+                                        if (channel_desc.includes('Spectrum')) {
+                                            wavelengths = content_lines[2].split(/\s+/g).slice(1).map(parseFloat);
+                                            tag = `PDA Scan`
+                                        } else if (channel_desc.includes('@')) {
+                                            const desc_split = channel_desc.split(/[ ,]+/g)
+                                            const wl_ind = desc_split.findIndex(el => el.includes('@'))
+                                            const wl = desc_split[wl_ind].split('@')[0]
+                                            tag = wl
+                                        }
+                                    }
+
+                                    //Go through all our harvested sources
+                                    let results: [string, string, string, string, number[], number[]][] = []
+                                    for (let i = 0; i < harvest_sources.length; i++){
+                                        //Check if the file source matches
+                                        if (harvest_sources[i] == tag){
+                                            let compound = harvest_compounds[i]
+                                            //Check for 3D or 2D data
+                                            if (wavelengths.length > 0){
+                                                let parsed_content = parse_data(content_lines.slice(4, -1))
+                                                let target = harvest_targets[i]
+                                                //Make our tag more descriptive
+                                                let new_tag = ""
+                                                if (tag.includes('MS')){
+                                                    new_tag = `${tag.substring(0, 3)}XIC ${target} m/z`
+                                                } else {
+                                                    new_tag = `XAC ${target} nm`
+                                                }
+                                                //Find the closest wavelength or m/z to the target
+                                                function find_closest(arr: number[], target: number): number{
+                                                    let diff = Math.abs(arr[0] - target)
+                                                    let best = 0
+                                                    for (let i = 1; i < arr.length; i++){
+                                                        if (Math.abs(arr[i] - target) < diff){
+                                                            best = i
+                                                        }
+                                                    }
+                                                    return best
+                                                }
+                                                let closest_wl_ind = find_closest(wavelengths, target)
+                                                results.push([sample_name, well, compound, new_tag, parsed_content[0], parsed_content[closest_wl_ind]])
+                                            } else {
+                                                let parsed_content = parse_data(content_lines.slice(2, -1))
+                                                //Easy push
+                                                results.push([sample_name, well, compound, tag, parsed_content[0], parsed_content[1]])
+                                            }
+                                        }
+                                    }
+                                    progress_resolve(results)
+                                });
+                            }
+                            const content = await _read_file_text(file)
+                            const parsed_content = await _harvest_empower_file(content, harvest_compounds, harvest_sources, harvest_targets)
+
+                            this.current_progress += 1 / this.num_files
+                            this.model.setv({
+                                progress_percent: Math.round(100 * this.current_progress)
+                            })
+                            return parsed_content
+                        })).then((result: ([string, string, string, string, number[], number[]][][])) =>{
+                            let results = result.reduce((accumulator, value) => accumulator.concat(value), [])
+                            let results_trans = results[0].map((_, colIndex) => results.map(row => row[colIndex]));
+                            this.model.setv({
+                                progress_percent: -1,
+                                progress_status: 'Uploading data.  Please wait...'
+                            })
+                            this.model.setv({
+                                transfered_text: results_trans.slice(0,4),
+                                transfered_data: results_trans.slice(4),
+                            })
+                            this.model.setv({
+                                progress_state: 2,
+                                progress_percent: 0,
+                                progress_status: 'Transfer complete!'
+                            })
+                        })
+                    } else {
+                        throw new Error("bk_target_table is null")
                     }
-                    const content = await _read_file_text(file)
-                    const parsed_content = await _harvest_empower_file(content, harvest_compounds, harvest_sources, harvest_targets)
-                    
-                    this.current_progress += 1 / this.num_files
-                    this.model.setv({
-                        progress_percent: Math.round(100 * this.current_progress)
-                    })
-                    return parsed_content
-                })).then((result: ([string, string, string, string, number[], number[]][][])) =>{
-                    let results = result.reduce((accumulator, value) => accumulator.concat(value), [])
-                    let results_trans = results[0].map((_, colIndex) => results.map(row => row[colIndex]));
-                    this.model.setv({
-                        progress_percent: -1,
-                        progress_status: 'Uploading data.  Please wait...'
-                    })
-                    this.model.setv({
-                        transfered_text: results_trans.slice(0,4),
-                        transfered_data: results_trans.slice(4),
-                    })
-                    this.model.setv({
-                        progress_state: 2,
-                        progress_percent: 0,
-                        progress_status: 'Transfer complete!'
-                    })
+                } else {
+                    throw new Error("document is null")
+                }
+                break;
+            case "fasta":
+                this.model.setv({
+                    progress_state: 2,
+                    progress_percent: 0,
+                    progress_status: 'Transfer complete!'
                 })
-            } else {
-                throw new Error("bk_target_table is null")
-            }
-        } else {
-            throw new Error("document is null")
+                break;
+            case "ab1":
+                this.model.setv({
+                    progress_percent: -1,
+                    progress_status: 'Uploading data.  Please wait...'
+                })
+                let sample_names: string[] = []
+                let bin_data: number[][][] = []
+                Array.from(this.input_el.files as FileList).forEach((file: File) => {
+                    let ab1_file = (file as AB1File)
+                    sample_names.push(ab1_file.sample_name)
+                    bin_data.push(ab1_file.results)
+
+                })
+                this.model.setv({
+                    transfered_text: [sample_names],
+                    transfered_data: bin_data,
+                })
+                this.model.setv({
+                    progress_state: 2,
+                    progress_percent: 0,
+                    progress_status: 'Transfer complete!'
+                })
+                break;
         }
     }    
 }

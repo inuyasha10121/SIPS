@@ -312,21 +312,44 @@ class Sequencing(param.Parameterized):
     def __init__(self, **params):
         super().__init__(**params)
     
+    def add_alignment(self, sequence: np.ndarray, direction: str):
+        if direction == "For":
+            self.forward_alignment = sequence
+        elif direction == "Rev":
+            self.reverse_alignment = sequence
+        else:
+            raise ValueError(f"Direction {direction} not 'For' or 'Rev'")
+
+    def add_ab1_data(self, data: np.ndarray, direction: str):
+        if direction == "For":
+            self.forward_abi_traces = data
+        elif direction == "Rev":
+            self.reverse_abi_traces = data
+        else:
+            raise ValueError(f"Direction {direction} not 'For' or 'Rev'")
+
     def save_binary(self, bin_data: bytes) -> bytes:
         bin_data += (
             save_arr_bin(self.forward_alignment, np.uint8) + 
-            save_arr_bin(self.forward_abi_trace, np.int16) + 
+            save_arr_bin(self.forward_abi_traces, np.int16) + 
             save_arr_bin(self.reverse_alignment, np.uint8) + 
-            save_arr_bin(self.reverse_abi_trace, np.int16)
+            save_arr_bin(self.reverse_abi_traces, np.int16)
         )
         return bin_data
     
     def load_binary(self, bin_data: bytes, offset: int) -> int:
         self.forward_alignment, offset = read_arr_bin(bin_data, offset, np.uint8)
-        self.forward_abi_trace, offset = read_arr_bin(bin_data, offset, np.int16)
+        self.forward_abi_traces, offset = read_arr_bin(bin_data, offset, np.int16)
         self.reverse_alignment, offset = read_arr_bin(bin_data, offset, np.uint8)
-        self.reverse_abi_trace, offset = read_arr_bin(bin_data, offset, np.int16)
+        self.reverse_abi_traces, offset = read_arr_bin(bin_data, offset, np.int16)
         return offset
+    
+    def get_tree(self, level=0):
+        ret_str = f"{'    '*level}|--For aln: Array({self.forward_alignment.shape})\n"
+        ret_str += f"{'    '*level}|--Rev aln: Array({self.reverse_alignment.shape})\n"
+        ret_str += f"{'    '*level}|--For AB1: Array({self.forward_abi_traces.shape})\n"
+        ret_str += f"{'    '*level}|--Rev AB1: Array({self.reverse_abi_traces.shape})\n"
+        return ret_str
     
     #def get_json(self):
     #    return json.loads(self.param.serialize_parameters())
@@ -354,6 +377,10 @@ class Well(param.Parameterized):
     
     def get_tree(self, level=0):
         ret_str = ""
+        if self.sequencing == None:
+            ret_str += f"{'    '*(level+1)}|--No sequencing\n"
+        else:
+            ret_str += f"{'    '*level}|--Sequencing\n{self.sequencing.get_tree(level+1)}"
         for compound in self.chromatograms:
             ret_str += f"{'    '*level}|--{compound}\n{self.chromatograms[compound].get_tree(level+1)}"
         return ret_str
@@ -367,6 +394,9 @@ class Well(param.Parameterized):
         else:
             raise ValueError(f"{target_compound} not found in chromatograms")
     
+    def add_sequencing(self):
+        self.sequencing = Sequencing()
+
     def save_binary(self, bin_data: bytes) -> bytes:
         chrom_names = list(self.chromatograms)
         n_chroms = len(chrom_names)

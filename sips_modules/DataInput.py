@@ -172,48 +172,134 @@ class module_class:
         
         #File upload and parsing
         def fi_upload_state_changed(event):
-            if event.new == 1:
-                #Setup our input view
-                fi_compound_input_module.visible = False
-                fi_alignment_input_module.visible = False
-                if fi_multi_upload.file_type == "Empower":
-                    fi_compound_input_module.visible = True
-                    #fi_target_table.push_targets(fi_multi_upload.file_params, fi_multi_upload.file_wavelengths)
-                    #print('PING')
-                elif fi_multi_upload.file_type == "aln":
-                    raise NotImplementedError('Alignment files not available yet')
-                    fi_alignment_input_module.visible = True
-                    fi_alignment_parent_entry.visible = True
-                elif fi_multi_upload.file_type == "ab1":
-                    raise NotImplementedError('Sequencing files not available yet')
-                    fi_alignment_input_module.visible = True
-                    fi_alignment_parent_entry.visible = False
-                #Turn on the harvest button if a plate is selected
-                if self.fi_plate_selector.value == 'New Plate':
-                    fi_file_harvest_button.disabled = True
-                else:
-                    fi_file_harvest_button.disabled = False
-            elif event.new == 2:
-                #Go through the received data and store it
-                plate = self.fi_plate_selector.value
-                for i in range(len(fi_multi_upload.transfered_text[0])):
-                    sample_name = fi_multi_upload.transfered_text[0][i]
-                    well = fi_multi_upload.transfered_text[1][i]
-                    compound = fi_multi_upload.transfered_text[2][i]
-                    source = fi_multi_upload.transfered_text[3][i]
-                    time = np.array(fi_multi_upload.transfered_data[0][i], dtype=np.float32)
-                    intensity = np.array(fi_multi_upload.transfered_data[1][i], dtype=np.float32)
-                    if well not in self.library[plate]:
-                        self.library[plate].add_well(well)
-                    if compound not in self.library[plate][well]:
-                        self.library[plate][well].add_chromatogram(compound, time, intensity, sample_name, source)
-                        if compound not in self.library.compounds:
-                            self.library.compounds.append(compound)
-                        if compound not in self.library[plate].compounds:
-                            self.library[plate].compounds.append(compound)
-                #Go back to idle
-                self.status_text.value = "Done loading data!"
-                fi_multi_upload.progress_state = 0
+            try:
+                if event.new == 1:
+                    #Setup our input view
+                    fi_compound_input_module.visible = False
+                    fi_alignment_input_module.visible = False
+                    if fi_multi_upload.file_type == "Empower":
+                        fi_compound_input_module.visible = True
+                    elif fi_multi_upload.file_type == "FASTA":
+                        fi_alignment_parent_entry.options = sorted([x[0] for x in fi_multi_upload.transfered_text])
+                        id_list = [x[0] for x in fi_multi_upload.transfered_text[:min(5, len(fi_multi_upload.transfered_text))]]
+                        max_len = max([len(x) for x in id_list])
+                        example_string = "          "
+                        for i in range(int(max_len/10)):
+                            example_string += "%s         "%(i+1)
+                        example_string += "\n"
+                        for i in range(int(max_len/10)+1):
+                            example_string += "0123456789"
+                        example_string += "\n"
+                        for i in range(len(id_list)):
+                            example_string += "%s\n"%id_list[i]
+                        fi_alignment_examples.object = example_string
+
+                        fi_compound_input_module.visible = False
+                        fi_alignment_input_module.visible = True
+                        fi_alignment_parent_entry.visible = True
+                    elif fi_multi_upload.file_type == "AB1":
+                        id_list = fi_multi_upload.transfered_text[0][:min(5, len(fi_multi_upload.transfered_text[0]))]
+                        max_len = max([len(x) for x in id_list])
+                        example_string = "          "
+                        for i in range(int(max_len/10)):
+                            example_string += "%s         "%(i+1)
+                        example_string += "\n"
+                        for i in range(int(max_len/10)+1):
+                            example_string += "0123456789"
+                        example_string += "\n"
+                        for i in range(len(id_list)):
+                            example_string += "%s\n"%id_list[i]
+                        fi_alignment_examples.object = example_string
+                        fi_compound_input_module.visible = False
+                        fi_alignment_input_module.visible = True
+                        fi_alignment_parent_entry.visible = False
+                    #Turn on the harvest button if a plate is selected
+                    if self.fi_plate_selector.value == 'New Plate':
+                        fi_file_harvest_button.disabled = True
+                    else:
+                        fi_file_harvest_button.disabled = False
+                elif event.new == 2:
+                    #Go through the received data and store it
+                    plate = self.fi_plate_selector.value
+                    if fi_multi_upload.file_type == "Empower":
+                        for i in range(len(fi_multi_upload.transfered_text[0])):
+                            sample_name = fi_multi_upload.transfered_text[0][i]
+                            well = fi_multi_upload.transfered_text[1][i]
+                            compound = fi_multi_upload.transfered_text[2][i]
+                            source = fi_multi_upload.transfered_text[3][i]
+                            time = np.array(fi_multi_upload.transfered_data[0][i], dtype=np.float32)
+                            intensity = np.array(fi_multi_upload.transfered_data[1][i], dtype=np.float32)
+                            if well not in self.library[plate]:
+                                self.library[plate].add_well(well)
+                            if compound not in self.library[plate][well]:
+                                self.library[plate][well].add_chromatogram(compound, time, intensity, sample_name, source)
+                                if compound not in self.library.compounds:
+                                    self.library.compounds.append(compound)
+                                if compound not in self.library[plate].compounds:
+                                    self.library[plate].compounds.append(compound)
+                    elif fi_multi_upload.file_type == "FASTA":
+                        for i in range(len(fi_multi_upload.transfered_text)):
+                            sample_name = fi_multi_upload.transfered_text[i][0]
+                            seq = np.array(list(fi_multi_upload.transfered_text[i][1]))
+                            if sample_name == fi_alignment_parent_entry.value:
+                                self.library[plate].parent_alignment = seq
+                            else:
+                                well = sample_name[fi_alignment_well_row_index.value]
+                                if fi_alignment_well_leading_zero.value:
+                                    well += sample_name[fi_alignment_well_column_index.value:fi_alignment_well_column_index.value+2]
+                                else:
+                                    if sample_name[fi_alignment_well_column_index.value] == '1':
+                                        if sample_name[fi_alignment_well_column_index.value+1].isnumeric():
+                                            well += sample_name[fi_alignment_well_column_index.value:fi_alignment_well_column_index.value+2]
+                                        else:
+                                            well += '01'
+                                    else:
+                                        well += '0' + sample_name[fi_alignment_well_column_index.value]
+                                read_dir = ""
+                                if fi_alignment_forward_string.value in sample_name:
+                                    read_dir = "For"
+                                elif fi_alignment_reverse_string.value in sample_name:
+                                    read_dir = "Rev"
+                                else:
+                                    raise ValueError(f"Direction element not found in {sample_name}")
+                                if well not in self.library[plate]:
+                                    self.library[plate].add_well(well)
+                                if self.library[plate][well].sequencing == None:
+                                    self.library[plate][well].add_sequencing()
+                                self.library[plate][well].sequencing.add_alignment(seq, read_dir)
+                    elif fi_multi_upload.file_type == "AB1":
+                        for i in range(len(fi_multi_upload.transfered_text[0])):
+                            sample_name = fi_multi_upload.transfered_text[0][i]
+                            ab1_data = np.array(fi_multi_upload.transfered_data[i], dtype=np.uint16)
+                            well = sample_name[fi_alignment_well_row_index.value]
+                            if fi_alignment_well_leading_zero.value:
+                                well += sample_name[fi_alignment_well_column_index.value:fi_alignment_well_column_index.value+2]
+                            else:
+                                if sample_name[fi_alignment_well_column_index.value] == '1':
+                                    if sample_name[fi_alignment_well_column_index.value+1].isnumeric():
+                                        well += sample_name[fi_alignment_well_column_index.value:fi_alignment_well_column_index.value+2]
+                                    else:
+                                        well += '01'
+                                else:
+                                    well += '0' + sample_name[fi_alignment_well_column_index.value]
+                            read_dir = ""
+                            if fi_alignment_forward_string.value in sample_name:
+                                read_dir = "For"
+                            elif fi_alignment_reverse_string.value in sample_name:
+                                read_dir = "Rev"
+                            else:
+                                raise ValueError(f"Direction element not found in {sample_name}")
+                            if well not in self.library[plate]:
+                                self.library[plate].add_well(well)
+                            if self.library[plate][well].sequencing == None:
+                                self.library[plate][well].add_sequencing()
+                            self.library[plate][well].sequencing.add_ab1_data(ab1_data, read_dir)
+                    #Go back to idle
+                    self.status_text.value = "Done loading data!"
+                    fi_multi_upload.progress_state = 0
+            except Exception as e:
+                self.status_text.value = "fi_upload_state_changed: " + str(e)
+                self.debug_text.value += traceback.format_exc() + "\n\n"
                 
         fi_multi_upload.param.watch(fi_upload_state_changed, ['progress_state'], onlychanged=False)
 
@@ -226,15 +312,6 @@ class module_class:
         fi_multi_upload.param.watch(fi_upload_progress_changed, ['progress_percent'], onlychanged=False)
 
         def _file_harvesting(event):
-            try:
-                if fi_multi_upload.file_type == "Empower":
-                    fi_multi_upload.harvest = not fi_multi_upload.harvest
-                elif fi_multi_upload.file_type == "aln":
-                    raise NotImplementedError('Alignment files not available yet')
-                elif fi_multi_upload.file_type == "ab1":
-                    raise NotImplementedError('Sequencing files not available yet')
-            except Exception as e:
-                self.status_text.value = "_file_harvesting: " + str(e)
-                self.debug_text.value += traceback.format_exc() + "\n\n"
+            fi_multi_upload.harvest = not fi_multi_upload.harvest
         fi_file_harvest_button.on_click(_file_harvesting)        
         return file_input_pane
