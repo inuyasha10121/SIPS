@@ -355,11 +355,12 @@ export class FileProgressInputView extends InputWidgetView {
                             }
                             //First, check to see if we have the necessary information in the header
                             let content_lines = content.split(/[\x0D\x0a]+/g)
-                            const header_labels = (content_lines[0].match(/(?:"[^"]*"|\S+)/g) as RegExpMatchArray)
-                            const header_content = (content_lines[1].match(/(?:"[^"]*"|\S+)/g) as RegExpMatchArray)
+                            const header_labels = content_lines[0].split(/\t/g)
+                            const header_content = content_lines[1].split(/\t/g)
             
                             const channel_ind = header_labels.indexOf("\"Channel Description\"")
                             if (channel_ind == -1){
+                                console.log(header_labels)
                                 reject(new Error(`${file.name} is missing a channel description`))
                             }
                             const channel_desc = header_content[channel_ind]
@@ -368,7 +369,19 @@ export class FileProgressInputView extends InputWidgetView {
                             if (vial_ind == -1){
                                 reject(new Error(`${file.name} is missing a vial ID`))
                             }
-                            let vial_bits = header_content[vial_ind].slice(2).split(',')
+                            let vial_bits = ["",""]
+                            try{
+                                vial_bits = header_content[vial_ind].replace(/\"/g, "").split(':')[1].split(',')
+                            } catch (error) {
+                                console.log(file.name)
+                                console.log("0> " + header_content[vial_ind])
+                                console.log("1> " + header_content[vial_ind].replace(/\"/g, ""))
+                                console.log("2> " + header_content[vial_ind].replace(/\"/g, "").split(':'))
+                                console.log("3> " + header_content[vial_ind].replace(/\"/g, "").split(':')[1])
+                                console.log("4> " + header_content[vial_ind].replace(/\"/g, "").split(':')[1].split(','))
+                                throw error
+                            }
+                            //let vial_bits = header_content[vial_ind].slice(2).split(',')
                             vial_bits[1] = vial_bits[1].padStart(2, '0')
                             file.well = vial_bits[0].toUpperCase() + vial_bits[1]
             
@@ -437,7 +450,7 @@ export class FileProgressInputView extends InputWidgetView {
                         
                     })
                 }
-
+                
                 Promise.all(Array.from(files).map(async (file) => {
                     return await this._read_file_text(file)
                 })).then((read_files) => {
@@ -588,6 +601,10 @@ export class FileProgressInputView extends InputWidgetView {
                                 }
                             }
                         }
+                        console.log("TABLE PARAMS")
+                        console.log(harvest_compounds)
+                        console.log(harvest_sources)
+                        console.log(harvest_targets)
                         //Now, we can read the files
                         this.model.setv({
                             progress_percent: 0,
@@ -636,8 +653,8 @@ export class FileProgressInputView extends InputWidgetView {
                         //            //Re-extract our relevant parameters from the header
                         //            //First, check to see if we have the necessary information in the header
                         //            let content_lines = content.split(/[\x0D\x0a]+/g)
-                        //            const header_labels = (content_lines[0].match(/(?:"[^"]*"|\S+)/g) as RegExpMatchArray)
-                        //            const header_content = (content_lines[1].match(/(?:"[^"]*"|\S+)/g) as RegExpMatchArray)
+                        //            const header_labels = content_lines[0].split(/\t/g)
+                        //            const header_content = content_lines[1].split(/\t/g)
                         //            
                         //            const vial_ind = header_labels.indexOf("\"Vial\"")
                         //            let vial_bits = header_content[vial_ind].slice(3, -1).split(',')
@@ -764,10 +781,11 @@ export class FileProgressInputView extends InputWidgetView {
                         //        progress_status: 'Transfer complete!'
                         //    })
                         //})
-
+                        
                         this.current_progress = 0
                         Promise.all(Array.from(this.input_el.files as FileList).map(async (file) => {
                             async function _read_file_text(file: File): Promise<string> {
+                                console.log(`Reading ${file.name}...`)
                                 return new Promise<string>((resolve, reject) => {
                                     const reader = new FileReader()
                                     reader.onload = () => {
@@ -803,12 +821,14 @@ export class FileProgressInputView extends InputWidgetView {
 
                                     //Re-extract our relevant parameters from the header
                                     //First, check to see if we have the necessary information in the header
+                                    console.log("Extracting header information")
                                     let content_lines = content.split(/[\x0D\x0a]+/g)
-                                    const header_labels = (content_lines[0].match(/(?:"[^"]*"|\S+)/g) as RegExpMatchArray)
-                                    const header_content = (content_lines[1].match(/(?:"[^"]*"|\S+)/g) as RegExpMatchArray)
+                                    const header_labels = content_lines[0].split(/\t/g)
+                                    const header_content = content_lines[1].split(/\t/g)
 
                                     const vial_ind = header_labels.indexOf("\"Vial\"")
-                                    let vial_bits = header_content[vial_ind].slice(3, -1).split(',')
+                                    //let vial_bits = header_content[vial_ind].slice(3, -1).split(',')
+                                    let vial_bits = header_content[vial_ind].replace(/\"/g, "").split(':')[1].split(',')
                                     vial_bits[1] = vial_bits[1].padStart(2, '0')
                                     const well = vial_bits[0].toUpperCase() + vial_bits[1]
 
@@ -852,6 +872,8 @@ export class FileProgressInputView extends InputWidgetView {
                                         }
                                     }
 
+
+                                    console.log("Extracting data")
                                     //Go through all our harvested sources
                                     let results: [string, string, string, string, number[], number[]][] = []
                                     for (let i = 0; i < harvest_sources.length; i++){
@@ -901,12 +923,15 @@ export class FileProgressInputView extends InputWidgetView {
                             })
                             return parsed_content
                         })).then((result: ([string, string, string, string, number[], number[]][][])) =>{
+                            console.log("Reshaping data")
+                            console.log(result)
                             let results = result.reduce((accumulator, value) => accumulator.concat(value), [])
                             let results_trans = results[0].map((_, colIndex) => results.map(row => row[colIndex]));
                             this.model.setv({
                                 progress_percent: -1,
                                 progress_status: 'Uploading data.  Please wait...'
                             })
+                            console.log("Uploading data")
                             this.model.setv({
                                 transfered_text: results_trans.slice(0,4),
                                 transfered_data: results_trans.slice(4),
