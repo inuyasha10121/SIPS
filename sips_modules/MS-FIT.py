@@ -17,6 +17,8 @@ from holoviews.streams import Stream, DoubleTap, SingleTap, BoundsX
 from bokeh import palettes
 
 from .PlateClass import Library
+from .global_utils import get_pn_id_token
+
 
 sidebar_text = """### MS-FIT
 This pane is responsible for processing and integrating chromatography data.  
@@ -57,9 +59,8 @@ The workflow for processing data is as follows:
 """
 
 class module_class:
-    def __init__(self, tab_id, library: Library, status_text: pn.widgets.TextInput, progress_bar: pn.widgets.Progress, debug_text: pn.widgets.TextInput):
+    def __init__(self, tab_id, status_text: pn.widgets.TextInput, progress_bar: pn.widgets.Progress, debug_text: pn.widgets.TextInput):
         self.tab_id = tab_id
-        self.library = library
         self.status_text = status_text
         self.progress_bar = progress_bar
         self.debug_text = debug_text
@@ -73,8 +74,9 @@ class module_class:
             try:
                 if event.name == "active":
                     if event.new == self.tab_id: #Info
+                        library: Library = pn.state.cache['id_tokens'][get_pn_id_token()]['library']
                         sidebar_info.object = sidebar_text
-                        plates = list(self.library)
+                        plates = list(library)
                         if len(plates) > 0:
                             self.pp_plate_selector.options = plates
                         else:
@@ -85,6 +87,8 @@ class module_class:
         tab_set.param.watch(tab_selection_callback, ['active'], onlychanged=False)
 
     def pane_definition(self):
+        library: Library = pn.state.cache['id_tokens'][get_pn_id_token()]['library']
+        
         #Standard inputs and control definition
         pp_rt_input = pn.widgets.FloatInput(name='Retention Time', value=0, step=0.01, width=80)
         pp_rt_tolerance = pn.widgets.FloatInput(name='RT Tolerance', value=0.2, step=0.01, start=0.01, width=80)
@@ -120,25 +124,25 @@ class module_class:
             try:
                 #First, get all our compounds
                 compounds = set()
-                for plate in self.library:
-                    for well in self.library[plate]:
-                        compounds.update(set(self.library[plate][well]))
+                for plate in library:
+                    for well in library[plate]:
+                        compounds.update(set(library[plate][well]))
                 columns = ['Plate', 'Well', 'Sample'] + list(compounds)
                 n_columns = len(columns)
                 #Harvest our data
                 well_order = [f"{chr(65+i)}{str(j).zfill(2)}" for j in range(1,13) for i in range(8)]
                 data = []
-                for plate in self.library:
+                for plate in library:
                     for well in well_order:
-                        if well in self.library[plate]:
+                        if well in library[plate]:
                             data.append(['' for _ in range(n_columns)])
                             data[-1][0] = plate
                             data[-1][1] = well
                             
-                            for compound in self.library[plate][well]:
-                                if self.library[plate][well][compound].sample_name != None:
-                                    data[-1][2] = self.library[plate][well][compound].sample_name
-                                data[-1][columns.index(compound)] = self.library[plate][well][compound].peak_area
+                            for compound in library[plate][well]:
+                                if library[plate][well][compound].sample_name != None:
+                                    data[-1][2] = library[plate][well][compound].sample_name
+                                data[-1][columns.index(compound)] = library[plate][well][compound].peak_area
                 #Send a stream to the file download widget
                 sio = StringIO()
                 pd.DataFrame(data, columns=columns).to_csv(sio, index=False)
@@ -161,20 +165,20 @@ class module_class:
             try:
                 #First, get all our compounds
                 compounds = set()
-                for plate in self.library:
-                    for well in self.library[plate]:
-                        compounds.update(set(self.library[plate][well]))
+                for plate in library:
+                    for well in library[plate]:
+                        compounds.update(set(library[plate][well]))
                 columns = ['Plate', 'Well'] + list(compounds)
                 n_columns = len(columns)
                 #Harvest our data
                 data = []
-                for plate in self.library:
-                    for well in self.library[plate]:
+                for plate in library:
+                    for well in library[plate]:
                         data.append(['' for _ in range(n_columns)])
                         data[-1][0] = plate
                         data[-1][1] = well
-                        for compound in self.library[plate][well]:
-                            data[-1][columns.index(compound)] = self.library[plate][well][compound].peak_area
+                        for compound in library[plate][well]:
+                            data[-1][columns.index(compound)] = library[plate][well][compound].peak_area
                 #Send a stream to the file download widget
                 sio = StringIO()
                 pd.DataFrame(data, columns=columns).to_csv(sio, index=False)
@@ -444,43 +448,43 @@ class module_class:
                     compound = self.pp_compound_selector.value
                     self.status_text.value = "Performing CWT analysis..."
                     #Set relevant parameters for well
-                    self.library[plate][well][compound].rt = pp_rt_input.value
-                    self.library[plate][well][compound].rt_tolerance = pp_rt_tolerance.value
-                    self.library[plate][well][compound].sigma = pp_sigma_input.value
-                    self.library[plate][well][compound].cwt_min_scale = pp_cwt_min_scale_input.value
-                    self.library[plate][well][compound].cwt_max_scale = pp_cwt_max_scale_input.value
-                    self.library[plate][well][compound].cwt_neighborhood = pp_cwt_neighborhood_input.value
-                    self.library[plate][well][compound].peak_bound_inds = [
-                        np.argmin(np.abs(pp_left_bound.value - self.library[plate][well][compound].time)), 
-                        np.argmin(np.abs(pp_right_bound.value - self.library[plate][well][compound].time))
+                    library[plate][well][compound].rt = pp_rt_input.value
+                    library[plate][well][compound].rt_tolerance = pp_rt_tolerance.value
+                    library[plate][well][compound].sigma = pp_sigma_input.value
+                    library[plate][well][compound].cwt_min_scale = pp_cwt_min_scale_input.value
+                    library[plate][well][compound].cwt_max_scale = pp_cwt_max_scale_input.value
+                    library[plate][well][compound].cwt_neighborhood = pp_cwt_neighborhood_input.value
+                    library[plate][well][compound].peak_bound_inds = [
+                        np.argmin(np.abs(pp_left_bound.value - library[plate][well][compound].time)), 
+                        np.argmin(np.abs(pp_right_bound.value - library[plate][well][compound].time))
                     ]
                     #Perform CWT peak finding workflow
-                    smoothed_chromatogram = self.library[plate][well][compound].gaussian_smoothing()
-                    second_deriv = self.library[plate][well][compound].second_deriv(smoothed_chromatogram)
-                    cwtmatr = self.library[plate][well][compound].cwt_generation(second_deriv)
+                    smoothed_chromatogram = library[plate][well][compound].gaussian_smoothing()
+                    second_deriv = library[plate][well][compound].second_deriv(smoothed_chromatogram)
+                    cwtmatr = library[plate][well][compound].cwt_generation(second_deriv)
                     self.status_text.value = "Finding minima/maxima in selection range..."
-                    minima_inds, maxima_inds = self.library[plate][well][compound].cwt_analysis(cwtmatr)
+                    minima_inds, maxima_inds = library[plate][well][compound].cwt_analysis(cwtmatr)
                     #Restrict minima/maxima to defined integration region
-                    mask = (maxima_inds[:,1] >= self.library[plate][well][compound].peak_bound_inds[0]) & (maxima_inds[:,1] <= self.library[plate][well][compound].peak_bound_inds[1])
+                    mask = (maxima_inds[:,1] >= library[plate][well][compound].peak_bound_inds[0]) & (maxima_inds[:,1] <= library[plate][well][compound].peak_bound_inds[1])
                     maxima_inds = maxima_inds[mask,:]
-                    span = self.library[plate][well][compound].peak_bound_inds[1] - self.library[plate][well][compound].peak_bound_inds[0]
-                    mask = (minima_inds[:,1] >= (self.library[plate][well][compound].peak_bound_inds[0] - span)) & (minima_inds[:,1] <= (self.library[plate][well][compound].peak_bound_inds[1] + span))
+                    span = library[plate][well][compound].peak_bound_inds[1] - library[plate][well][compound].peak_bound_inds[0]
+                    mask = (minima_inds[:,1] >= (library[plate][well][compound].peak_bound_inds[0] - span)) & (minima_inds[:,1] <= (library[plate][well][compound].peak_bound_inds[1] + span))
                     minima_inds = minima_inds[mask,:]
                     #Figure out bounds with appropriate padding
-                    time_per_pixel = (self.library[plate][well][compound].time[-1] - self.library[plate][well][compound].time[0]) / cwtmatr.shape[1]
+                    time_per_pixel = (library[plate][well][compound].time[-1] - library[plate][well][compound].time[0]) / cwtmatr.shape[1]
                     bounds = [
-                        self.library[plate][well][compound].time[0] - (time_per_pixel/2),
+                        library[plate][well][compound].time[0] - (time_per_pixel/2),
                         pp_cwt_min_scale_input.value - 0.5,
-                        self.library[plate][well][compound].time[-1] + (time_per_pixel/2),
+                        library[plate][well][compound].time[-1] + (time_per_pixel/2),
                         pp_cwt_max_scale_input.value + 0.5
                     ]
                     #Map minima and maxima indicies to time values
                     minima_inds = minima_inds.astype(np.float32)
                     minima_inds[:,0] += pp_cwt_min_scale_input.value
-                    minima_inds[:,1] = minima_inds[:,1] * time_per_pixel + self.library[plate][well][compound].time[0]
+                    minima_inds[:,1] = minima_inds[:,1] * time_per_pixel + library[plate][well][compound].time[0]
                     maxima_inds = maxima_inds.astype(np.float32)
                     maxima_inds[:,0] += pp_cwt_min_scale_input.value
-                    maxima_inds[:,1] = maxima_inds[:,1] * time_per_pixel + self.library[plate][well][compound].time[0]
+                    maxima_inds[:,1] = maxima_inds[:,1] * time_per_pixel + library[plate][well][compound].time[0]
                     
                     
             except Exception as e:
@@ -592,7 +596,7 @@ class module_class:
                     
             plate = self.pp_plate_selector.value
             compound = self.pp_compound_selector.value
-            disp_well_list = [well for well in plate_view.well_list if self.library[plate][well][compound].peak_area != None]
+            disp_well_list = [well for well in plate_view.well_list if library[plate][well][compound].peak_area != None]
 
             if len(disp_well_list) == 0:
                 pp_peak_source_display.value = ""
@@ -604,13 +608,13 @@ class module_class:
             else:
                 if len(disp_well_list) == 1:
                     well = disp_well_list[0]
-                    pp_peak_source_display.value = self.library[plate][well][compound].source
-                    pp_peak_rt_display.value = out_format(self.library[plate][well][compound].peak_rt)
-                    pp_peak_area_display.value = out_format(self.library[plate][well][compound].peak_area)
-                    pp_peak_height_display.value = out_format(self.library[plate][well][compound].peak_height)
-                    pp_peak_snr_display.value = out_format(self.library[plate][well][compound].peak_snr)
-                    if self.library[plate][well][compound].peak_stcurve_area != None:
-                        pp_peak_stcurve_area.value = out_format(self.library[plate][well][compound].peak_stcurve_area)
+                    pp_peak_source_display.value = library[plate][well][compound].source
+                    pp_peak_rt_display.value = out_format(library[plate][well][compound].peak_rt)
+                    pp_peak_area_display.value = out_format(library[plate][well][compound].peak_area)
+                    pp_peak_height_display.value = out_format(library[plate][well][compound].peak_height)
+                    pp_peak_snr_display.value = out_format(library[plate][well][compound].peak_snr)
+                    if library[plate][well][compound].peak_stcurve_area != None:
+                        pp_peak_stcurve_area.value = out_format(library[plate][well][compound].peak_stcurve_area)
                     else:
                         pp_peak_stcurve_area.value = "N/A"
                 else:
@@ -621,14 +625,14 @@ class module_class:
                     snrs = np.zeros(n_wells)
                     stcurve_areas = np.zeros(n_wells)
                     all_stcurve = True
-                    pp_peak_source_display.value = ", ".join([self.library[plate][well][compound].source for well in disp_well_list])
+                    pp_peak_source_display.value = ", ".join([library[plate][well][compound].source for well in disp_well_list])
                     for i, well in enumerate(disp_well_list):
-                        rts[i] = self.library[plate][well][compound].peak_rt
-                        areas[i] = self.library[plate][well][compound].peak_area
-                        heights[i] = self.library[plate][well][compound].peak_height
-                        snrs[i] = self.library[plate][well][compound].peak_snr
-                        if self.library[plate][well][compound].peak_stcurve_area != None:
-                            stcurve_areas[i] = self.library[plate][well][compound].peak_stcurve_area
+                        rts[i] = library[plate][well][compound].peak_rt
+                        areas[i] = library[plate][well][compound].peak_area
+                        heights[i] = library[plate][well][compound].peak_height
+                        snrs[i] = library[plate][well][compound].peak_snr
+                        if library[plate][well][compound].peak_stcurve_area != None:
+                            stcurve_areas[i] = library[plate][well][compound].peak_stcurve_area
                         else:
                             all_stcurve = False
                     pp_peak_rt_display.value = out_format(np.average(rts), np.std(rts))
@@ -652,7 +656,7 @@ class module_class:
         def pp_plate_selector_watchdog(event):
             try:
                 if (event.new != None) and (event.new != ""):
-                    compounds = list(self.library[event.new].compounds)
+                    compounds = list(library[event.new].compounds)
                     if self.pp_compound_selector.value in compounds:
                         new_sele = self.pp_compound_selector.value
                     else:
@@ -672,9 +676,9 @@ class module_class:
                     if len(plate_view.well_list) > 0:
                         #Only retain wells which have the newly selected compound
                         for i in range(len(plate_view.well_list)-1, -1, -1):
-                            if plate_view.well_list[i] not in self.library[plate]:
+                            if plate_view.well_list[i] not in library[plate]:
                                 del plate_view.well_list[i]
-                            elif event.new not in self.library[plate][plate_view.well_list[i]]:
+                            elif event.new not in library[plate][plate_view.well_list[i]]:
                                 del plate_view.well_list[i]
                         plate_view.highlight_plot.event()
                     plate_view.plate_plot.event()
@@ -700,13 +704,13 @@ class module_class:
                 plate = self.pp_plate_selector.value
                 compound = self.pp_compound_selector.value
                 for i, well in enumerate(plate_view.well_list, 1):
-                    if compound in self.library[plate][well]:
+                    if compound in library[plate][well]:
                         stcurve_slope = None
                         stcurve_intercept = None
                         if (pp_stcurve_slope.value != 0) and (pp_stcurve_slope.value != None) and (pp_stcurve_intercept.value != None):
                             stcurve_slope = pp_stcurve_slope.value
                             stcurve_intercept = pp_stcurve_intercept.value
-                        self.library[plate][well][compound].set_processing_parameters(
+                        library[plate][well][compound].set_processing_parameters(
                             pp_rt_input.value,
                             pp_rt_tolerance.value,
                             pp_left_bound.value,
@@ -720,8 +724,8 @@ class module_class:
                             stcurve_slope,
                             stcurve_intercept
                         )
-                        self.library[plate][well][compound].process_peak()
-                    self.progress_bar.value = int(np.round((100 * i) / len(self.library[plate])))
+                        library[plate][well][compound].process_peak()
+                    self.progress_bar.value = int(np.round((100 * i) / len(library[plate])))
                 selection_view.integration_statistics_plot.event()
                 plate_view.plate_plot.event()
                 self.status_text.value = "Done integrating well!"
@@ -735,9 +739,9 @@ class module_class:
                 self.status_text.value = "Integrating plate..."
                 plate = self.pp_plate_selector.value
                 compound = self.pp_compound_selector.value
-                for i, well in enumerate(self.library[plate], 1):
-                    if compound in self.library[plate][well]:
-                        self.library[plate][well][compound].set_processing_parameters(
+                for i, well in enumerate(library[plate], 1):
+                    if compound in library[plate][well]:
+                        library[plate][well][compound].set_processing_parameters(
                             pp_rt_input.value,
                             pp_rt_tolerance.value,
                             pp_left_bound.value,
@@ -749,8 +753,8 @@ class module_class:
                             pp_friction_input.value,
                             pp_drop_baseline_checkbox.value
                         )
-                        self.library[plate][well][compound].process_peak()
-                    self.progress_bar.value = int(np.round((100 * i) / len(self.library[plate])))
+                        library[plate][well][compound].process_peak()
+                    self.progress_bar.value = int(np.round((100 * i) / len(library[plate])))
                 selection_view.integration_statistics_plot.event()
                 plate_view.plate_plot.event()
                 self.status_text.value = "Done integrating plate!"
@@ -763,10 +767,10 @@ class module_class:
             try:
                 self.status_text.value = "Integrating library..."
                 compound = self.pp_compound_selector.value
-                for i, plate in enumerate(self.library):
-                    for j, well in enumerate(self.library[plate], 1):
-                        if compound in self.library[plate][well]:
-                            self.library[plate][well][compound].set_processing_parameters(
+                for i, plate in enumerate(library):
+                    for j, well in enumerate(library[plate], 1):
+                        if compound in library[plate][well]:
+                            library[plate][well][compound].set_processing_parameters(
                                 pp_rt_input.value,
                                 pp_rt_tolerance.value,
                                 pp_left_bound.value,
@@ -778,8 +782,8 @@ class module_class:
                                 pp_friction_input.value,
                                 pp_drop_baseline_checkbox.value
                             )
-                            self.library[plate][well][compound].process_peak()
-                        self.progress_bar.value = int(np.round(100 * ((i/len(self.library)) + ((1/len(self.library)) * (j/len(self.library[plate]))))))
+                            library[plate][well][compound].process_peak()
+                        self.progress_bar.value = int(np.round(100 * ((i/len(library)) + ((1/len(library)) * (j/len(library[plate]))))))
                 selection_view.integration_statistics_plot.event()
                 plate_view.plate_plot.event()
                 self.status_text.value = "Done integrating library!"
@@ -800,19 +804,19 @@ class module_class:
                 self.progress_bar.value = 0
                 maxima_times = []
                 for i, well in enumerate(plate_view.well_list):
-                    if compound in self.library[plate][well]:
-                        time_start_ind = np.argmin(np.abs(pp_left_bound.value - self.library[plate][well][compound].time))
-                        time_end_ind = np.argmin(np.abs(pp_right_bound.value - self.library[plate][well][compound].time))
-                        maxima_times.append(self.library[plate][well][compound].time[
-                                time_start_ind + np.argmax(gaussian_filter1d(self.library[plate][well][compound].intensity, sigma)[time_start_ind:time_end_ind])
+                    if compound in library[plate][well]:
+                        time_start_ind = np.argmin(np.abs(pp_left_bound.value - library[plate][well][compound].time))
+                        time_end_ind = np.argmin(np.abs(pp_right_bound.value - library[plate][well][compound].time))
+                        maxima_times.append(library[plate][well][compound].time[
+                                time_start_ind + np.argmax(gaussian_filter1d(library[plate][well][compound].intensity, sigma)[time_start_ind:time_end_ind])
                             ])
                         self.progress_bar.value = int(np.round((100 * (i+1)) / (n_wells*2)))
                 self.status_text.value = "Applying drift correction..."
                 average_time = np.average(maxima_times)
                 n_wells = len(maxima_times)
                 for i, well in enumerate(plate_view.well_list):
-                    if compound in self.library[plate][well]:
-                        self.library[plate][well][compound].drift_offset = (average_time - maxima_times[i])
+                    if compound in library[plate][well]:
+                        library[plate][well][compound].drift_offset = (average_time - maxima_times[i])
                         self.progress_bar.value = int(np.round((100 * (i+1+n_wells)) / (n_wells*2)))
                 selection_view.update_overlay_plot()
                 selection_view.integration_statistics_plot.event()
@@ -823,27 +827,27 @@ class module_class:
             plate = self.pp_plate_selector.value
             compound = self.pp_compound_selector.value
             sigma = pp_sigma_input.value
-            n_wells = len(self.library[plate])
+            n_wells = len(library[plate])
             if n_wells < 2:
                 self.status_text.value = "At least 2 wells must be present for drift correction"
             else:
                 self.status_text.value = "Determining average maxima position..."
                 self.progress_bar.value = 0
                 maxima_times = []
-                for i, well in enumerate(self.library[plate]):
-                    if compound in self.library[plate][well]:
-                        time_start_ind = np.argmin(np.abs(pp_left_bound.value - self.library[plate][well][compound].time))
-                        time_end_ind = np.argmin(np.abs(pp_right_bound.value - self.library[plate][well][compound].time))
-                        maxima_times.append(self.library[plate][well][compound].time[
-                                time_start_ind + np.argmax(gaussian_filter1d(self.library[plate][well][compound].intensity, sigma)[time_start_ind:time_end_ind])
+                for i, well in enumerate(library[plate]):
+                    if compound in library[plate][well]:
+                        time_start_ind = np.argmin(np.abs(pp_left_bound.value - library[plate][well][compound].time))
+                        time_end_ind = np.argmin(np.abs(pp_right_bound.value - library[plate][well][compound].time))
+                        maxima_times.append(library[plate][well][compound].time[
+                                time_start_ind + np.argmax(gaussian_filter1d(library[plate][well][compound].intensity, sigma)[time_start_ind:time_end_ind])
                             ])
                     self.progress_bar.value = int(np.round((100 * (i+1)) / (n_wells*2)))
                 self.status_text.value = "Applying drift correction..."
                 average_time = np.average(maxima_times)
                 n_wells = len(maxima_times)
-                for i, well in enumerate(self.library[plate]):
-                    if compound in self.library[plate][well]:
-                        self.library[plate][well][compound].drift_offset = (average_time - maxima_times[i])
+                for i, well in enumerate(library[plate]):
+                    if compound in library[plate][well]:
+                        library[plate][well][compound].drift_offset = (average_time - maxima_times[i])
                         self.progress_bar.value = int(np.round((100 * (i+1+n_wells)) / (n_wells*2)))
                 selection_view.update_overlay_plot()
                 selection_view.integration_statistics_plot.event()
@@ -854,7 +858,7 @@ class module_class:
             plate = self.pp_plate_selector.value
             compound = self.pp_compound_selector.value
             for well in plate_view.well_list:
-                self.library[plate][well][compound].drift_offset = 0
+                library[plate][well][compound].drift_offset = 0
             selection_view.update_overlay_plot()
             selection_view.integration_statistics_plot.event()
         pp_clear_drift_correct_selection_button.on_click(pp_clear_drift_correct_selection_button_callback)
@@ -862,8 +866,8 @@ class module_class:
         def pp_clear_drift_correct_plate_button_callback(event):
             plate = self.pp_plate_selector.value
             compound = self.pp_compound_selector.value
-            for well in self.library[plate]:
-                self.library[plate][well][compound].drift_offset = 0
+            for well in library[plate]:
+                library[plate][well][compound].drift_offset = 0
             selection_view.update_overlay_plot()
             selection_view.integration_statistics_plot.event()
         pp_clear_drift_correct_plate_button.on_click(pp_clear_drift_correct_plate_button_callback)

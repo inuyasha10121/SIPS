@@ -7,6 +7,7 @@ import traceback
 from custom_widgets.fileprogressinput import FileProgressInput
 from custom_widgets.dataselectiontable import DataSelectionTable
 from .PlateClass import *
+from .global_utils import get_pn_id_token
 
 sidebar_text = """### Data Input
 SIPS takes the following data as inputs and file formats:
@@ -33,9 +34,8 @@ Please wait patiently for data to load (watch the loading indicators, including 
 """
 
 class module_class:
-    def __init__(self, tab_id, library: Library, status_text, progress_bar, debug_text):
+    def __init__(self, tab_id, status_text, progress_bar, debug_text):
         self.tab_id = tab_id
-        self.library = library
         self.status_text = status_text
         self.progress_bar = progress_bar
         self.debug_text = debug_text
@@ -48,8 +48,9 @@ class module_class:
             try:
                 if event.name == "active":
                     if event.new == self.tab_id: #Info
+                        library: Library = pn.state.cache['id_tokens'][get_pn_id_token()]['library']
                         sidebar_info.object = sidebar_text
-                        self.fi_plate_selector.options = ['New Plate'] + list(self.library.plates)
+                        self.fi_plate_selector.options = ['New Plate'] + list(library.plates)
                         self.fi_plate_selector.value = 'New Plate'
             except Exception as e:
                 self.status_text.value = "tab_selection_callback" + str(e)
@@ -58,6 +59,7 @@ class module_class:
     
 
     def pane_definition(self):
+        library: Library = pn.state.cache['id_tokens'][get_pn_id_token()]['library']
         try:
             #Input declarations and section assembly
             fi_multi_upload = FileProgressInput(name='bk_fi_multi_upload', width=300, height=450, multiple=True)
@@ -153,8 +155,8 @@ class module_class:
                 else:
                     if len(fi_plate_name.value) != 0:
                         self.status_text.value = f"Adding {fi_plate_name.value}"
-                        self.library.add_plate(fi_plate_name.value)
-                        self.fi_plate_selector.options = ['New Plate'] + list(self.library.plates)
+                        library.add_plate(fi_plate_name.value)
+                        self.fi_plate_selector.options = ['New Plate'] + list(library.plates)
             except Exception as e:
                 self.status_text.value = "fi_add_plate_watchdog: " + str(e)
                 self.debug_text.value += traceback.format_exc() + "\n\n"
@@ -163,8 +165,8 @@ class module_class:
         def fi_delete_plate_watchdog(event):
             try:
                 self.status_text.value = "Removing %s"%self.fi_plate_selector.value
-                self.library.remove_plate(fi_plate_name.value)
-                self.fi_plate_selector.options = ['New Plate'] + list(self.library.plates)
+                library.remove_plate(self.fi_plate_selector.value)
+                self.fi_plate_selector.options = ['New Plate'] + list(library.plates)
             except Exception as e:
                 self.status_text.value = "fi_delete_plate_watchdog: " + str(e)
                 self.debug_text.value += traceback.format_exc() + "\n\n"
@@ -229,20 +231,20 @@ class module_class:
                             source = fi_multi_upload.transfered_text[3][i]
                             time = np.array(fi_multi_upload.transfered_data[0][i], dtype=np.float32)
                             intensity = np.array(fi_multi_upload.transfered_data[1][i], dtype=np.float32)
-                            if well not in self.library[plate]:
-                                self.library[plate].add_well(well)
-                            if compound not in self.library[plate][well]:
-                                self.library[plate][well].add_chromatogram(compound, time, intensity, sample_name, source)
-                                if compound not in self.library.compounds:
-                                    self.library.compounds.append(compound)
-                                if compound not in self.library[plate].compounds:
-                                    self.library[plate].compounds.append(compound)
+                            if well not in library[plate]:
+                                library[plate].add_well(well)
+                            if compound not in library[plate][well]:
+                                library[plate][well].add_chromatogram(compound, time, intensity, sample_name, source)
+                                if compound not in library.compounds:
+                                    library.compounds.append(compound)
+                                if compound not in library[plate].compounds:
+                                    library[plate].compounds.append(compound)
                     elif fi_multi_upload.file_type == "FASTA":
                         for i in range(len(fi_multi_upload.transfered_text)):
                             sample_name = fi_multi_upload.transfered_text[i][0]
                             seq = np.array(list(fi_multi_upload.transfered_text[i][1]))
                             if sample_name == fi_alignment_parent_entry.value:
-                                self.library[plate].parent_alignment = seq
+                                library[plate].parent_alignment = seq
                             else:
                                 well = sample_name[fi_alignment_well_row_index.value]
                                 if fi_alignment_well_leading_zero.value:
@@ -262,11 +264,11 @@ class module_class:
                                     read_dir = "Rev"
                                 else:
                                     raise ValueError(f"Direction element not found in {sample_name}")
-                                if well not in self.library[plate]:
-                                    self.library[plate].add_well(well)
-                                if self.library[plate][well].sequencing == None:
-                                    self.library[plate][well].add_sequencing()
-                                self.library[plate][well].sequencing.add_alignment(seq, read_dir)
+                                if well not in library[plate]:
+                                    library[plate].add_well(well)
+                                if library[plate][well].sequencing == None:
+                                    library[plate][well].add_sequencing()
+                                library[plate][well].sequencing.add_alignment(seq, read_dir)
                     elif fi_multi_upload.file_type == "AB1":
                         for i in range(len(fi_multi_upload.transfered_text[0])):
                             sample_name = fi_multi_upload.transfered_text[0][i]
@@ -289,11 +291,11 @@ class module_class:
                                 read_dir = "Rev"
                             else:
                                 raise ValueError(f"Direction element not found in {sample_name}")
-                            if well not in self.library[plate]:
-                                self.library[plate].add_well(well)
-                            if self.library[plate][well].sequencing == None:
-                                self.library[plate][well].add_sequencing()
-                            self.library[plate][well].sequencing.add_ab1_data(ab1_data, read_dir)
+                            if well not in library[plate]:
+                                library[plate].add_well(well)
+                            if library[plate][well].sequencing == None:
+                                library[plate][well].add_sequencing()
+                            library[plate][well].sequencing.add_ab1_data(ab1_data, read_dir)
                     #Go back to idle
                     self.status_text.value = "Done loading data!"
                     fi_multi_upload.progress_state = 0

@@ -1,6 +1,7 @@
 # Project specific
 assets/credentials.json
 launch_script.sh
+Sandbox.ipynb
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
